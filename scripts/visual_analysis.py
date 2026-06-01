@@ -148,6 +148,7 @@ def render_preview(normalized_file: Path, out_dir: Path, timeout_seconds: int, m
         str(preview_dir),
         "-TimeoutSeconds",
         str(timeout_seconds),
+        "-ContinueAfterComFailure",
     ]
     try:
         proc = run_command(command, timeout=max(timeout_seconds + 20, 30))

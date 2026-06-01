@@ -406,6 +406,8 @@ class OfficeReaderTests(unittest.TestCase):
                     "1",
                 ],
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=False,
@@ -415,6 +417,66 @@ class OfficeReaderTests(unittest.TestCase):
             data = json.loads(proc.stdout)
             self.assertIn(data["status"], {"success", "failed"})
             self.assertIn("messages", data)
+
+    def test_render_preview_com_worker_failure_can_continue_to_later_backends(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "board-memo.docx"
+            out_dir = tmp_path / "preview"
+            fake_soffice = tmp_path / "soffice.cmd"
+            make_docx(source)
+            fake_soffice.write_text(
+                "@echo off\r\n"
+                "set OUTDIR=\r\n"
+                ":args\r\n"
+                "if \"%~1\"==\"\" goto doneargs\r\n"
+                "if \"%~1\"==\"--outdir\" (\r\n"
+                "  set OUTDIR=%~2\r\n"
+                "  shift\r\n"
+                ")\r\n"
+                "shift\r\n"
+                "goto args\r\n"
+                ":doneargs\r\n"
+                "if not defined OUTDIR exit /b 2\r\n"
+                "echo fake pdf> \"%OUTDIR%\\board-memo.pdf\"\r\n"
+                "exit /b 0\r\n",
+                encoding="utf-8",
+            )
+            script = SCRIPTS_DIR / "render_preview.ps1"
+            env = os.environ.copy()
+            env["SOFFICE_PATH"] = str(fake_soffice)
+
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script),
+                    "-InputPath",
+                    str(source),
+                    "-OutputDir",
+                    str(out_dir),
+                    "-TimeoutSeconds",
+                    "1",
+                    "-ContinueAfterComFailure",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["backend"], "libreoffice")
+            self.assertIn("messages", data)
+            self.assertTrue((out_dir / "board-memo.pdf").exists())
 
 
 if __name__ == "__main__":

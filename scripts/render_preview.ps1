@@ -3,6 +3,7 @@ param(
     [string]$InputPath,
     [string]$OutputDir = "",
     [int]$TimeoutSeconds = 90,
+    [switch]$ContinueAfterComFailure,
     [switch]$ComWorker
 )
 
@@ -28,6 +29,36 @@ function Emit-Failure {
     param([string[]]$Messages)
     New-PreviewResult -Status "failed" -Backend "" -Artifacts @() -Messages $Messages | ConvertTo-Json -Depth 5
     exit 1
+}
+
+function Resolve-LibreOfficeExecutable {
+    $command = Get-Command soffice,libreoffice,soffice.exe,libreoffice.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command -and $command.Source) {
+        return $command.Source
+    }
+
+    $candidates = @()
+    foreach ($value in @($env:LIBREOFFICE_PATH, $env:SOFFICE_PATH)) {
+        if ([string]::IsNullOrWhiteSpace($value)) { continue }
+        if (Test-Path -LiteralPath $value -PathType Leaf) {
+            $candidates += $value
+        } elseif (Test-Path -LiteralPath $value -PathType Container) {
+            $candidates += (Join-Path $value "soffice.exe")
+            $candidates += (Join-Path $value "program\soffice.exe")
+        }
+    }
+
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA)) {
+        if ([string]::IsNullOrWhiteSpace($root)) { continue }
+        $candidates += (Join-Path $root "LibreOffice\program\soffice.exe")
+    }
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+    return ""
 }
 
 function Invoke-ComWorker {
@@ -98,6 +129,7 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $pdfPath = Join-Path $outDir ([IO.Path]::GetFileNameWithoutExtension($sourcePath) + ".pdf")
 
 $messages = @()
+$skipInlineCom = $false
 
 if (-not $ComWorker) {
     $hasOfficeCom = (
@@ -105,57 +137,97 @@ if (-not $ComWorker) {
         ($ext -eq ".pptx" -and (Test-Path "Registry::HKEY_CLASSES_ROOT\PowerPoint.Application\CLSID"))
     )
     if ($hasOfficeCom) {
-        Invoke-ComWorker -SourcePath $sourcePath -OutputDirectory $outDir -Timeout $TimeoutSeconds
+        if ($ContinueAfterComFailure) {
+            $skipInlineCom = $true
+            $workerJson = Join-Path $outDir ("preview-worker-main-" + [guid]::NewGuid().ToString("N") + ".json")
+            $workerErr = Join-Path $outDir ("preview-worker-main-" + [guid]::NewGuid().ToString("N") + ".err.txt")
+            $encodedInput = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($sourcePath))
+            $encodedOutput = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($outDir))
+            $encodedScriptPath = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($ScriptPath))
+            $workerCommand = @"
+`$scriptPath = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('$encodedScriptPath'))
+`$inputPath = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('$encodedInput'))
+`$outputDir = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('$encodedOutput'))
+& `$scriptPath -InputPath `$inputPath -OutputDir `$outputDir -ComWorker
+"@
+            $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($workerCommand))
+            $process = Start-Process -FilePath "powershell" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encodedCommand) -PassThru -WindowStyle Hidden -RedirectStandardOutput $workerJson -RedirectStandardError $workerErr
+            if (-not $process.WaitForExit([Math]::Max(1, $TimeoutSeconds) * 1000)) {
+                try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
+                Get-CimInstance Win32_Process -Filter "Name='WINWORD.EXE' OR Name='POWERPNT.EXE'" |
+                    Where-Object { $_.CommandLine -match "/Automation|-Embedding" } |
+                    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+                $messages += "Office COM preview timed out after $TimeoutSeconds seconds; continuing to fallback preview backends."
+            } else {
+                $workerText = if (Test-Path -LiteralPath $workerJson) { Get-Content -LiteralPath $workerJson -Raw } else { "" }
+                try {
+                    $workerResult = $workerText | ConvertFrom-Json
+                    if ($workerResult.status -eq "success") {
+                        $workerResult | ConvertTo-Json -Depth 5
+                        exit 0
+                    }
+                    foreach ($message in @($workerResult.messages)) {
+                        if ($message) { $messages += "Office COM preview failed before fallback: $message" }
+                    }
+                } catch {
+                    $messages += "Office COM preview worker returned non-JSON output; continuing to fallback preview backends."
+                }
+            }
+        } else {
+            Invoke-ComWorker -SourcePath $sourcePath -OutputDirectory $outDir -Timeout $TimeoutSeconds
+        }
     }
 }
 
-try {
-    if ($ext -eq ".docx" -and (Test-Path "Registry::HKEY_CLASSES_ROOT\Word.Application\CLSID")) {
-        $word = New-Object -ComObject Word.Application
-        $word.Visible = $false
-        $doc = $word.Documents.Open($sourcePath)
-        try {
-            $doc.ExportAsFixedFormat($pdfPath, 17)
-        } finally {
-            $doc.Close([ref]$false)
-            $word.Quit()
+if (-not $skipInlineCom) {
+    try {
+        if ($ext -eq ".docx" -and (Test-Path "Registry::HKEY_CLASSES_ROOT\Word.Application\CLSID")) {
+            $word = New-Object -ComObject Word.Application
+            $word.Visible = $false
+            $doc = $word.Documents.Open($sourcePath)
+            try {
+                $doc.ExportAsFixedFormat($pdfPath, 17)
+            } finally {
+                $doc.Close([ref]$false)
+                $word.Quit()
+            }
+            if (Test-Path -LiteralPath $pdfPath) {
+                New-PreviewResult -Status "success" -Backend "office-com" -Artifacts @($pdfPath) -Messages @("Exported DOCX preview PDF with Word COM.") | ConvertTo-Json -Depth 5
+                exit 0
+            }
         }
-        if (Test-Path -LiteralPath $pdfPath) {
-            New-PreviewResult -Status "success" -Backend "office-com" -Artifacts @($pdfPath) -Messages @("Exported DOCX preview PDF with Word COM.") | ConvertTo-Json -Depth 5
-            exit 0
-        }
+    } catch {
+        $messages += "Word COM preview failed: $($_.Exception.Message)"
+        try { if ($doc) { $doc.Close([ref]$false) }; if ($word) { $word.Quit() } } catch {}
     }
-} catch {
-    $messages += "Word COM preview failed: $($_.Exception.Message)"
-    try { if ($doc) { $doc.Close([ref]$false) }; if ($word) { $word.Quit() } } catch {}
+
+    try {
+        if ($ext -eq ".pptx" -and (Test-Path "Registry::HKEY_CLASSES_ROOT\PowerPoint.Application\CLSID")) {
+            $powerPoint = New-Object -ComObject PowerPoint.Application
+            $presentation = $powerPoint.Presentations.Open($sourcePath, $true, $false, $false)
+            try {
+                $presentation.SaveAs($pdfPath, 32)
+            } finally {
+                $presentation.Close()
+                $powerPoint.Quit()
+            }
+            if (Test-Path -LiteralPath $pdfPath) {
+                New-PreviewResult -Status "success" -Backend "office-com" -Artifacts @($pdfPath) -Messages @("Exported PPTX preview PDF with PowerPoint COM.") | ConvertTo-Json -Depth 5
+                exit 0
+            }
+        }
+    } catch {
+        $messages += "PowerPoint COM preview failed: $($_.Exception.Message)"
+        try { if ($presentation) { $presentation.Close() }; if ($powerPoint) { $powerPoint.Quit() } } catch {}
+    }
 }
 
-try {
-    if ($ext -eq ".pptx" -and (Test-Path "Registry::HKEY_CLASSES_ROOT\PowerPoint.Application\CLSID")) {
-        $powerPoint = New-Object -ComObject PowerPoint.Application
-        $presentation = $powerPoint.Presentations.Open($sourcePath, $true, $false, $false)
-        try {
-            $presentation.SaveAs($pdfPath, 32)
-        } finally {
-            $presentation.Close()
-            $powerPoint.Quit()
-        }
-        if (Test-Path -LiteralPath $pdfPath) {
-            New-PreviewResult -Status "success" -Backend "office-com" -Artifacts @($pdfPath) -Messages @("Exported PPTX preview PDF with PowerPoint COM.") | ConvertTo-Json -Depth 5
-            exit 0
-        }
-    }
-} catch {
-    $messages += "PowerPoint COM preview failed: $($_.Exception.Message)"
-    try { if ($presentation) { $presentation.Close() }; if ($powerPoint) { $powerPoint.Quit() } } catch {}
-}
-
-$soffice = Get-Command soffice,libreoffice,soffice.exe,libreoffice.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+$soffice = Resolve-LibreOfficeExecutable
 if ($soffice) {
     try {
         $profile = Join-Path $outDir (".lo_profile_" + [guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Force -Path $profile | Out-Null
-        & $soffice.Source --headless "-env:UserInstallation=file:///$($profile.Replace('\','/'))" --convert-to pdf --outdir $outDir $sourcePath | Out-Null
+        & $soffice --headless "-env:UserInstallation=file:///$($profile.Replace('\','/'))" --convert-to pdf --outdir $outDir $sourcePath | Out-Null
         if (Test-Path -LiteralPath $pdfPath) {
             New-PreviewResult -Status "success" -Backend "libreoffice" -Artifacts @($pdfPath) -Messages @("Exported preview PDF with LibreOffice.") | ConvertTo-Json -Depth 5
             exit 0
