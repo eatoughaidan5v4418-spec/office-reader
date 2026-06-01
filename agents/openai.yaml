@@ -1,0 +1,4 @@
+interface:
+  display_name: "Office Reader"
+  short_description: "Deep-read Word and PowerPoint files with OCR/visual review"
+  default_prompt: "Use $office-reader to deep-read this Word or PowerPoint file in balanced mode, including OOXML extraction, tables, comments, revisions, speaker notes, OCR/visual findings, full Markdown, manifest, and structured report."
