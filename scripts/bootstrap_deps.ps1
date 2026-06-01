@@ -42,9 +42,15 @@ function Get-CommandSource {
     param([string[]]$Names)
     foreach ($dir in Get-LocalToolDirs) {
         foreach ($name in $Names) {
-            $candidate = Join-Path $dir $name
-            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-                return (Resolve-Path -LiteralPath $candidate).Path
+            $candidateNames = @($name)
+            if ([IO.Path]::GetExtension($name) -eq "") {
+                $candidateNames += "$name.exe"
+            }
+            foreach ($candidateName in $candidateNames) {
+                $candidate = Join-Path $dir $candidateName
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                    return (Resolve-Path -LiteralPath $candidate).Path
+                }
             }
         }
     }
