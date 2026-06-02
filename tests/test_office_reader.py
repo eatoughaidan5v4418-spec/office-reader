@@ -770,6 +770,7 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(data["backend"], "libreoffice")
             self.assertIn("messages", data)
             self.assertTrue((out_dir / "board-memo.pdf").exists())
+            self.assertEqual(list(out_dir.glob(".lo_profile_*")), [])
 
     def test_render_preview_skips_unhealthy_com_backend_from_health_memory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1019,6 +1020,65 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(data["status"], "failed")
             self.assertIn("already exists", " ".join(data["messages"]).lower())
             self.assertEqual(existing_docx.read_text(encoding="utf-8"), "existing normalized document")
+
+    def test_legacy_conversion_cleans_libreoffice_profile_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "legacy.doc"
+            out_dir = tmp_path / "converted"
+            fake_soffice = tmp_path / "soffice.cmd"
+            source.write_bytes(b"not a real legacy document")
+            fake_soffice.write_text(
+                "@echo off\r\n"
+                "set OUTDIR=\r\n"
+                ":args\r\n"
+                "if \"%~1\"==\"\" goto doneargs\r\n"
+                "if \"%~1\"==\"--outdir\" (\r\n"
+                "  set OUTDIR=%~2\r\n"
+                "  shift\r\n"
+                ")\r\n"
+                "shift\r\n"
+                "goto args\r\n"
+                ":doneargs\r\n"
+                "if not defined OUTDIR exit /b 2\r\n"
+                "echo fake docx> \"%OUTDIR%\\legacy.docx\"\r\n"
+                "exit /b 0\r\n",
+                encoding="utf-8",
+            )
+            script = SCRIPTS_DIR / "convert_legacy_office.ps1"
+            env = os.environ.copy()
+            env["PATH"] = str(tmp_path) + os.pathsep + env.get("PATH", "")
+
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script),
+                    "-InputPath",
+                    str(source),
+                    "-OutputDir",
+                    str(out_dir),
+                    "-PreferredBackend",
+                    "libreoffice",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["backend"], "libreoffice")
+            self.assertTrue((out_dir / "legacy.docx").exists())
+            self.assertEqual(list(out_dir.glob(".lo_profile_*")), [])
 
 
 if __name__ == "__main__":

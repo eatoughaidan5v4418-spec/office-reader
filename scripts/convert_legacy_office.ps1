@@ -74,9 +74,19 @@ function Save-WithLibreOffice {
     if (-not $exe) { return $false }
     $convertTo = if ($Extension.ToLowerInvariant() -eq ".ppt") { "pptx" } else { "docx" }
     $profile = Join-Path $OutputDirectory (".lo_profile_" + [guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Force -Path $profile | Out-Null
-    & $exe --headless "-env:UserInstallation=file:///$($profile.Replace('\','/'))" --convert-to $convertTo --outdir $OutputDirectory $Input | Out-Null
-    return $true
+    try {
+        New-Item -ItemType Directory -Force -Path $profile | Out-Null
+        & $exe --headless "-env:UserInstallation=file:///$($profile.Replace('\','/'))" --convert-to $convertTo --outdir $OutputDirectory $Input | Out-Null
+        return $true
+    } finally {
+        if (Test-Path -LiteralPath $profile -PathType Container) {
+            try {
+                Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction Stop
+            } catch {
+                Write-Error -ErrorAction Continue "LibreOffice temporary profile cleanup failed: $($_.Exception.Message)"
+            }
+        }
+    }
 }
 
 if (-not (Test-Path -LiteralPath $InputPath -PathType Leaf)) {

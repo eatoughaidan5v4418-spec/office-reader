@@ -142,6 +142,17 @@ function Resolve-LibreOfficeExecutable {
     return ""
 }
 
+function Stop-OfficeComAutomationProcesses {
+    param([ref]$Messages)
+    try {
+        Get-CimInstance Win32_Process -Filter "Name='WINWORD.EXE' OR Name='POWERPNT.EXE'" -ErrorAction Stop |
+            Where-Object { $_.CommandLine -match "/Automation|-Embedding" } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    } catch {
+        $Messages.Value += "Could not inspect Office COM automation processes for cleanup: $($_.Exception.Message)"
+    }
+}
+
 function Invoke-ComWorker {
     param(
         [string]$SourcePath,
@@ -174,10 +185,12 @@ function Invoke-ComWorker {
     }
     if (-not $process.WaitForExit([Math]::Max(1, $Timeout) * 1000)) {
         try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
-        Get-CimInstance Win32_Process -Filter "Name='WINWORD.EXE' OR Name='POWERPNT.EXE'" |
-            Where-Object { $_.CommandLine -match "/Automation|-Embedding" } |
-            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        $workerMessages = @()
+        Stop-OfficeComAutomationProcesses -Messages ([ref]$workerMessages)
         $message = "Preview rendering timed out after $Timeout seconds."
+        if ($workerMessages.Count -gt 0) {
+            $message += " " + ($workerMessages -join " ")
+        }
         if (Test-Path -LiteralPath $stderr) {
             $errorText = (Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue).Trim()
             if ($errorText) { $message += " Worker stderr: $errorText" }
@@ -247,9 +260,7 @@ if (-not $ComWorker) {
             $process = Start-Process -FilePath "powershell" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encodedCommand) -PassThru -WindowStyle Hidden -RedirectStandardOutput $workerJson -RedirectStandardError $workerErr
             if (-not $process.WaitForExit([Math]::Max(1, $TimeoutSeconds) * 1000)) {
                 try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
-                Get-CimInstance Win32_Process -Filter "Name='WINWORD.EXE' OR Name='POWERPNT.EXE'" |
-                    Where-Object { $_.CommandLine -match "/Automation|-Embedding" } |
-                    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+                Stop-OfficeComAutomationProcesses -Messages ([ref]$messages)
                 Write-OfficeComPreviewHealth -Extension $ext -State "unhealthy" -Reason "timeout" -Timeout $TimeoutSeconds
                 $messages += "Office COM preview timed out after $TimeoutSeconds seconds; continuing to fallback preview backends."
             } else {
@@ -323,16 +334,29 @@ if (-not $skipInlineCom) {
 
 $soffice = Resolve-LibreOfficeExecutable
 if ($soffice) {
+    $profile = $null
+    $libreOfficeSuccess = $false
     try {
         $profile = Join-Path $outDir (".lo_profile_" + [guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Force -Path $profile | Out-Null
         & $soffice --headless "-env:UserInstallation=file:///$($profile.Replace('\','/'))" --convert-to pdf --outdir $outDir $sourcePath | Out-Null
         if (Test-Path -LiteralPath $pdfPath) {
-            New-PreviewResult -Status "success" -Backend "libreoffice" -Artifacts @($pdfPath) -Messages @($messages + "Exported preview PDF with LibreOffice.") | ConvertTo-Json -Depth 5
-            exit 0
+            $libreOfficeSuccess = $true
         }
     } catch {
         $messages += "LibreOffice preview failed: $($_.Exception.Message)"
+    } finally {
+        if ($profile -and (Test-Path -LiteralPath $profile -PathType Container)) {
+            try {
+                Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction Stop
+            } catch {
+                $messages += "LibreOffice temporary profile cleanup failed: $($_.Exception.Message)"
+            }
+        }
+    }
+    if ($libreOfficeSuccess) {
+        New-PreviewResult -Status "success" -Backend "libreoffice" -Artifacts @($pdfPath) -Messages @($messages + "Exported preview PDF with LibreOffice.") | ConvertTo-Json -Depth 5
+        exit 0
     }
 } else {
     $messages += "LibreOffice preview backend not found."

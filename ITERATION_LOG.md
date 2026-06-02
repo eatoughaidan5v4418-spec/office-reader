@@ -1,5 +1,43 @@
 # Office Reader Iteration Log
 
+## 2026-06-02 - LibreOffice temp profile cleanup
+
+### Problems Found
+
+- `render_preview.ps1` created `.lo_profile_<guid>` directories in the preview output directory and did not clean them after LibreOffice finished.
+- `convert_legacy_office.ps1` created the same temporary LibreOffice profile directories during `.doc/.ppt` fallback conversion and left them behind.
+- While testing this cleanup, `render_preview.ps1` also exposed a structured-output reliability bug: `Get-CimInstance Win32_Process` can be denied under managed permissions, causing the script to exit with no JSON stdout instead of returning a structured failure/fallback result.
+
+### Changes Completed
+
+- Added best-effort cleanup of LibreOffice temporary profile directories in preview rendering.
+- Added best-effort cleanup of LibreOffice temporary profile directories in legacy conversion.
+- Made Office COM automation process cleanup best-effort in `render_preview.ps1`; access-denied diagnostics are added to messages instead of breaking JSON output.
+- Added regression coverage:
+  - preview LibreOffice fallback leaves no `.lo_profile_*` directories.
+  - legacy conversion LibreOffice fallback leaves no `.lo_profile_*` directories.
+  - timeout health-memory test continues to receive structured JSON even when process inspection is unavailable.
+
+### Verification
+
+- Focused tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_render_preview_timeout_records_unhealthy_com_backend tests.test_office_reader.OfficeReaderTests.test_render_preview_com_worker_failure_can_continue_to_later_backends tests.test_office_reader.OfficeReaderTests.test_legacy_conversion_cleans_libreoffice_profile_directory -v`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 23 tests
+
+### Remaining Risks
+
+- COM worker stdout/stderr temp files are still retained in some paths.
+- Legacy `.doc/.ppt` Office COM conversion still lacks the preview-style timeout isolation.
+- DOCX headers, footers, footnotes, endnotes, block-level content controls, and textbox-originated content still need extraction and positioning.
+
+### Next Round Direction
+
+- Add DOCX non-body part extraction for headers, footers, footnotes, and endnotes, with synthetic OOXML coverage.
+
 ## 2026-06-02 - PPTX visual object inventory v2
 
 ### Problems Found
