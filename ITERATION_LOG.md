@@ -1,5 +1,43 @@
 # Office Reader Iteration Log
 
+## 2026-06-02 - DOCX comment range anchors
+
+### Problems Found
+
+- Word comments were associated with `commentReference` ids but did not expose the text span covered by `commentRangeStart/commentRangeEnd`.
+- Reports and manifests could say a paragraph had a comment without showing what exact phrase the reviewer commented on.
+
+### Changes Completed
+
+- Added comment range scanning for DOCX paragraphs with optional subtree skipping.
+- Added `anchor_text` to Word comment records when a matching range span is present.
+- Preserved existing paragraph/table/content-control/textbox location metadata.
+- Report comments now show the anchor text when present.
+- Added a synthetic DOCX regression fixture covering `commentRangeStart`, covered text, `commentRangeEnd`, and `commentReference`.
+- Updated `references/output_schema.md`.
+
+### Verification
+
+- Focused tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_comment_range_anchor_text tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_textbox_content_with_origin tests.test_office_reader.OfficeReaderTests.test_docx_reader_outputs_markdown_and_manifest -v`
+  - Result: `OK`
+- Report focused tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_report_assembler_uses_manifest_counts_and_outline tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_comment_range_anchor_text -v`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 27 tests
+
+### Remaining Risks
+
+- Move revisions (`w:moveFrom`, `w:moveTo`) are not yet modeled separately.
+- DOCX drawing geometry/alt text for images is still less detailed than PPTX visual object inventory.
+
+### Next Round Direction
+
+- Add move revision extraction.
+
 ## 2026-06-02 - DOCX textbox origin metadata
 
 ### Problems Found

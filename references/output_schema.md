@@ -14,7 +14,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `metadata`: package metadata from `docProps/core.xml` when present.
 - `structure`: paragraphs/headings for Word or ordered slides for PowerPoint. Word entries may include `part_type` and `part` for non-body sources such as headers, footers, footnotes, and endnotes, and `container` values such as `content_control` or `textbox` when text came from those containers.
 - `tables`: extracted table rows with document, slide, or Word part location.
-- `comments`: Word comments or PowerPoint comments. Word comments referenced inside a table cell may include `table_index`, `row_index`, `cell_index`, `part_type`, and `part`.
+- `comments`: Word comments or PowerPoint comments. Word comments may include `anchor_text` when `commentRangeStart/commentRangeEnd` identifies the commented span. Word comments referenced inside a table cell may include `table_index`, `row_index`, `cell_index`, `part_type`, and `part`.
 - `revisions`: Word tracked insertions and deletions. Word revisions inside a table cell may include `table_index`, `row_index`, `cell_index`, `part_type`, and `part`.
 - `notes`: PowerPoint speaker notes.
 - `visual_analysis`: visual pipeline status, selected mode, rendered page count, analyzed item count, cache hits, backends, and messages.

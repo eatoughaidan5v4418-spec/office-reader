@@ -88,6 +88,27 @@ def extract_comment_refs(paragraph, skip_subtree_names: set[str] | None = None) 
     return ids
 
 
+def comment_anchor_texts(paragraph, skip_subtree_names: set[str] | None = None) -> dict[str, str]:
+    anchors: dict[str, list[str]] = {}
+    active: list[str] = []
+    for node in iter_without_subtrees(paragraph, skip_subtree_names or set()):
+        if node.tag == qn("w", "commentRangeStart"):
+            ref_id = node.attrib.get(W_ID)
+            if ref_id is not None:
+                active.append(ref_id)
+                anchors.setdefault(ref_id, [])
+            continue
+        if node.tag == qn("w", "commentRangeEnd"):
+            ref_id = node.attrib.get(W_ID)
+            if ref_id in active:
+                active.remove(ref_id)
+            continue
+        if local_name(node.tag) in {"t", "delText"} and node.text and active:
+            for ref_id in active:
+                anchors.setdefault(ref_id, []).append(node.text)
+    return {ref_id: "".join(parts).strip() for ref_id, parts in anchors.items() if "".join(parts).strip()}
+
+
 def iter_blips(element, skip_subtree_names: set[str] | None = None):
     for node in iter_without_subtrees(element, skip_subtree_names or set()):
         if node.tag == qn("a", "blip"):
@@ -201,6 +222,7 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                         paragraph_index += 1
                         level = heading_level(child) if part_type == "document" else None
                         refs = extract_comment_refs(child, skip_subtree_names=skip_names)
+                        anchors = comment_anchor_texts(child, skip_subtree_names=skip_names)
                         location = base_location(extra_location)
                         item = {
                             "type": "heading" if level else "paragraph",
@@ -223,6 +245,8 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                             comment = comments_by_id.get(ref_id)
                             if comment:
                                 comment.update({"paragraph_index": paragraph_index, **location})
+                                if anchors.get(ref_id):
+                                    comment["anchor_text"] = anchors[ref_id]
                                 markdown.append(f"> Comment {ref_id}: {comment['text']}")
 
                         for blip in iter_blips(child, skip_subtree_names=skip_names):
@@ -251,10 +275,13 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                                 for revision in revisions:
                                     revision.update(location)
                                     manifest["revisions"].append(revision)
+                                anchors = comment_anchor_texts(paragraph, skip_subtree_names=TEXTBOX_SKIP_NAMES)
                                 for ref_id in extract_comment_refs(paragraph, skip_subtree_names=TEXTBOX_SKIP_NAMES):
                                     comment = comments_by_id.get(ref_id)
                                     if comment:
                                         comment.update(location)
+                                        if anchors.get(ref_id):
+                                            comment["anchor_text"] = anchors[ref_id]
                                 for blip in iter_blips(paragraph, skip_subtree_names=TEXTBOX_SKIP_NAMES):
                                     rel_id = blip.attrib.get(R_EMBED)
                                     target = resolved_relationship_target(part_path, part_rels, rel_id)

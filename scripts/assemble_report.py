@@ -119,7 +119,8 @@ def build_report(manifest: dict[str, Any]) -> str:
     if comments:
         for comment in comments[:80]:
             location = f"slide {comment.get('slide_index')}" if comment.get("slide_index") else f"id {comment.get('id', '')}".strip()
-            lines.append(f"- Comment {location}: {first_sentence(comment.get('text', ''))}")
+            anchor = f" on '{first_sentence(comment.get('anchor_text', ''), 120)}'" if comment.get("anchor_text") else ""
+            lines.append(f"- Comment {location}{anchor}: {first_sentence(comment.get('text', ''))}")
     else:
         lines.append("- No comments extracted.")
     if revisions:

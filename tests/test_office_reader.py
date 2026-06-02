@@ -198,6 +198,31 @@ def make_docx_with_textbox(path):
     write_zip(path, files)
 
 
+def make_docx_with_comment_range(path):
+    files = {
+        "word/document.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Please verify </w:t></w:r>
+      <w:commentRangeStart w:id="5"/>
+      <w:r><w:t>ARR source</w:t></w:r>
+      <w:commentRangeEnd w:id="5"/>
+      <w:r><w:t> before release.</w:t></w:r>
+      <w:r><w:commentReference w:id="5"/></w:r>
+    </w:p>
+  </w:body>
+</w:document>""",
+        "word/comments.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:comment w:id="5" w:author="Reviewer" w:date="2026-05-01T00:00:00Z">
+    <w:p><w:r><w:t>Add source citation.</w:t></w:r></w:p>
+  </w:comment>
+</w:comments>""",
+    }
+    write_zip(path, files)
+
+
 def make_pptx(path):
     files = {
         "ppt/presentation.xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -459,6 +484,21 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(textbox_media["container"], "textbox")
             self.assertEqual(textbox_media["target"], "word/media/textbox.png")
 
+    def test_docx_reader_extracts_comment_range_anchor_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "comment-range.docx"
+            out_dir = tmp_path / "out"
+            make_docx_with_comment_range(source)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+
+            manifest = json.loads((out_dir / "comment-range.manifest.json").read_text(encoding="utf-8"))
+            comment = next(item for item in manifest["comments"] if item["id"] == "5")
+            self.assertEqual(comment["text"], "Add source citation.")
+            self.assertEqual(comment["anchor_text"], "ARR source")
+            self.assertEqual(comment["paragraph_index"], 1)
+
     def test_pptx_reader_extracts_slides_notes_comments_and_tables(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -549,7 +589,7 @@ class OfficeReaderTests(unittest.TestCase):
                         "document_type": "pptx",
                         "structure": [{"type": "slide", "index": 1, "title": "Launch Readiness", "text": "Three blockers remain."}],
                         "tables": [{"index": 1, "rows": [["Owner", "Status"]]}],
-                        "comments": [{"text": "Clarify launch date."}],
+                        "comments": [{"text": "Clarify launch date.", "anchor_text": "launch date"}],
                         "revisions": [],
                         "notes": [{"slide_index": 1, "text": "Ask support to confirm staffing."}],
                         "visual_findings": [
@@ -589,6 +629,7 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertIn("- Comments: 1", report)
             self.assertIn("Launch Readiness", report)
             self.assertIn("Clarify launch date.", report)
+            self.assertIn("on 'launch date'", report)
             self.assertIn("Object: smartart", report)
             self.assertIn("data_model=ppt/diagrams/data1.xml", report)
             self.assertIn("prog_id=Excel.Sheet.12", report)
