@@ -109,6 +109,74 @@ def slide_relationships_member(slide_path: str) -> str:
     return f"{Path(slide_path).parent.as_posix()}/_rels/{Path(slide_path).name}.rels"
 
 
+def rel_target(slide_path: str, rel: dict[str, str]) -> str:
+    target = rel.get("target", "")
+    return resolve_part_path(slide_path, target) if target else ""
+
+
+def non_visual_props(node) -> dict[str, str]:
+    props = node.find(".//p:cNvPr", NS)
+    if props is None:
+        return {"name": "", "alt_text": "", "title": ""}
+    return {
+        "name": props.attrib.get("name", ""),
+        "alt_text": props.attrib.get("descr", ""),
+        "title": props.attrib.get("title", ""),
+    }
+
+
+def transform_geometry(node) -> dict[str, int]:
+    xfrm = node.find(".//a:xfrm", NS)
+    if xfrm is None:
+        return {}
+    off = xfrm.find("a:off", NS)
+    ext = xfrm.find("a:ext", NS)
+    geometry: dict[str, int] = {}
+    if off is not None:
+        for key in ("x", "y"):
+            if key in off.attrib:
+                geometry[key] = int(off.attrib[key])
+    if ext is not None:
+        for key in ("cx", "cy"):
+            if key in ext.attrib:
+                geometry[key] = int(ext.attrib[key])
+    return geometry
+
+
+def visual_object_base(node, object_type: str) -> dict[str, Any]:
+    base = {"object_type": object_type, **non_visual_props(node)}
+    geometry = transform_geometry(node)
+    if geometry:
+        base["geometry"] = geometry
+    return base
+
+
+def extract_visual_objects(slide_root, slide_path: str, slide_index: int, rels: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
+    objects: list[dict[str, Any]] = []
+    for pic in slide_root.iter(qn("p", "pic")):
+        item = visual_object_base(pic, "image")
+        blip = next(pic.iter(qn("a", "blip")), None)
+        if blip is not None:
+            rel_id = blip.attrib.get(R_EMBED, "")
+            rel = rels.get(rel_id, {})
+            item.update({"relationship_id": rel_id, "target": rel_target(slide_path, rel)})
+        item["slide_index"] = slide_index
+        objects.append(item)
+
+    for chart in slide_root.iter(qn("c", "chart")):
+        rel_id = chart.attrib.get(qn("r", "id"), "")
+        rel = rels.get(rel_id, {})
+        item = {
+            "slide_index": slide_index,
+            "object_type": "chart",
+            "relationship_id": rel_id,
+            "target": rel_target(slide_path, rel),
+        }
+        objects.append(item)
+
+    return objects
+
+
 def extract_pptx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
     manifest = default_manifest(source, "pptx")
     markdown: list[str] = []
@@ -165,18 +233,20 @@ def extract_pptx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                 markdown.append(f"> Comment: {comment['text']}")
 
             slide_media = []
+            visual_objects = extract_visual_objects(root, slide_path, index, rels)
             for blip in root.iter(qn("a", "blip")):
                 rel_id = blip.attrib.get(R_EMBED)
                 rel = rels.get(rel_id or "")
                 if rel:
                     slide_media.append({"relationship_id": rel_id or "", "target": rel.get("target", "")})
-            if slide_media:
+            if visual_objects or slide_media:
                 manifest["visual_findings"].append(
                     {
                         "slide_index": index,
                         "requires_visual_review": True,
-                        "reason": "slide contains embedded media references",
+                        "reason": "slide contains visual objects or embedded media references",
                         "media": slide_media,
+                        "objects": visual_objects,
                     }
                 )
 

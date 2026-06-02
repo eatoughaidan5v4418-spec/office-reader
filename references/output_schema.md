@@ -43,6 +43,14 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 
 For DOCX media relationships found inside a table cell, entries under `visual_findings[].relationships` may include `table_index`, `row_index`, and `cell_index`.
 
+For PPTX slides, entries under `visual_findings[].objects` may include a structured visual object inventory:
+
+- `object_type`: `image`, `chart`, or another visual risk type.
+- `slide_index`: slide location.
+- `name`, `alt_text`, and `title`: non-visual DrawingML metadata when present.
+- `relationship_id` and `target`: relationship identifier and resolved package target.
+- `geometry`: EMU coordinates with `x`, `y`, `cx`, and `cy` when the object has an `a:xfrm`.
+
 If these fields are empty, the report must list the visual gap instead of claiming the image content was fully read.
 
 ## Completeness Score

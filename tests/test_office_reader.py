@@ -95,7 +95,16 @@ def make_pptx(path):
       <a:tr><a:tc><a:txBody><a:p><a:r><a:t>Owner</a:t></a:r></a:p></a:txBody></a:tc><a:tc><a:txBody><a:p><a:r><a:t>Status</a:t></a:r></a:p></a:txBody></a:tc></a:tr>
       <a:tr><a:tc><a:txBody><a:p><a:r><a:t>Ops</a:t></a:r></a:p></a:txBody></a:tc><a:tc><a:txBody><a:p><a:r><a:t>At risk</a:t></a:r></a:p></a:txBody></a:tc></a:tr>
     </a:tbl></a:graphicData></a:graphic></p:graphicFrame>
-    <p:pic><p:blipFill><a:blip r:embed="rIdImage1"/></p:blipFill></p:pic>
+    <p:pic>
+      <p:nvPicPr><p:cNvPr id="7" name="Hero image" descr="Revenue dashboard screenshot"/></p:nvPicPr>
+      <p:blipFill><a:blip r:embed="rIdImage1"/></p:blipFill>
+      <p:spPr><a:xfrm><a:off x="914400" y="1828800"/><a:ext cx="3657600" cy="1828800"/></a:xfrm></p:spPr>
+    </p:pic>
+    <p:graphicFrame>
+      <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
+        <c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="rIdChart1"/>
+      </a:graphicData></a:graphic>
+    </p:graphicFrame>
   </p:spTree></p:cSld>
 </p:sld>""",
         "ppt/slides/_rels/slide1.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
@@ -103,6 +112,7 @@ def make_pptx(path):
   <Relationship Id="rIdNotes1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide1.xml"/>
   <Relationship Id="rIdComments1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments/comment1.xml"/>
   <Relationship Id="rIdImage1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+  <Relationship Id="rIdChart1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/>
 </Relationships>""",
         "ppt/notesSlides/notesSlide1.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
@@ -189,6 +199,17 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(manifest["notes"][0]["text"], "Ask support to confirm staffing.")
             self.assertEqual(manifest["comments"][0]["text"], "Clarify launch date.")
             self.assertEqual(manifest["tables"][0]["rows"][1], ["Ops", "At risk"])
+            finding = manifest["visual_findings"][0]
+            objects = finding["objects"]
+            image = next(item for item in objects if item["object_type"] == "image")
+            self.assertEqual(image["name"], "Hero image")
+            self.assertEqual(image["alt_text"], "Revenue dashboard screenshot")
+            self.assertEqual(image["relationship_id"], "rIdImage1")
+            self.assertEqual(image["target"], "ppt/media/image1.png")
+            self.assertEqual(image["geometry"], {"x": 914400, "y": 1828800, "cx": 3657600, "cy": 1828800})
+            chart = next(item for item in objects if item["object_type"] == "chart")
+            self.assertEqual(chart["relationship_id"], "rIdChart1")
+            self.assertEqual(chart["target"], "ppt/charts/chart1.xml")
 
     def test_report_assembler_uses_manifest_counts_and_outline(self):
         with tempfile.TemporaryDirectory() as tmp:

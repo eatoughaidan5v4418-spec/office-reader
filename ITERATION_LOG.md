@@ -1,5 +1,44 @@
 # Office Reader Iteration Log
 
+## 2026-06-02 - PPTX visual object inventory v1
+
+### Problems Found
+
+- `read_pptx.py` only recorded `a:blip` media relationship hints.
+- PPTX image object names, alt text, and EMU geometry were not exposed in the manifest.
+- Chart-only visual risk objects did not produce structured visual object records.
+
+### Changes Completed
+
+- Added chart and diagram namespaces to `common_ooxml.py`.
+- Added `visual_findings[].objects` for PPTX slides.
+- Extracted image object metadata:
+  - `name`
+  - `alt_text`
+  - `title`
+  - `relationship_id`
+  - resolved package `target`
+  - EMU `geometry`
+- Extracted chart visual-risk objects with relationship id and resolved target.
+- Kept legacy `visual_findings[].media` for compatibility.
+- Added a synthetic PPTX regression fixture covering image alt text, image geometry, and chart risk.
+- Updated `references/output_schema.md`.
+
+### Verification
+
+- Focused test:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_pptx_reader_extracts_slides_notes_comments_and_tables -v`
+  - Result: `OK`
+
+### Remaining Risks
+
+- SmartArt, OLE, video, and audio objects are still not inventoried in v1.
+- Group transforms, crop, rotation, z-order, and layout/master inherited objects are not handled yet.
+
+### Next Round Direction
+
+- Extend PPTX object inventory to SmartArt, OLE, video, and audio with minimal synthetic fixtures.
+
 ## 2026-06-02 - Output no-clobber and preview reuse
 
 ### Problems Found
