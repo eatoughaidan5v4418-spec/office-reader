@@ -18,7 +18,19 @@
 - `warnings`: non-fatal extraction warnings, such as malformed optional OOXML parts that were skipped while preserving readable body content.
 - `visual_analysis`: visual pipeline status, selected mode, rendered page count, analyzed item count, cache hits, backends, and messages.
 - `visual_findings`: flags for media, drawings, image-heavy content, OCR text, rendered-page observations, vision summaries, diagram summaries, confidence, backend, duration, and cache status.
+- `completeness_score`: explainable `0-100` reading coverage score with `grade`, weighted `components`, `openai_vision_enabled`, and `remaining_gaps`. It measures pipeline coverage, not factual correctness.
 - `artifacts`: paths to generated `.full.md`, `.manifest.json`, and report files.
+
+## Reading Completeness Score
+
+`completeness_score.components` contains:
+
+- `textual_structure`: whether readable paragraphs or slides were extracted, weight `45`.
+- `table_extraction`: OOXML table extraction coverage, weight `15`.
+- `visual_review`: required visual items compared with items confirmed by OCR or a non-placeholder visual backend, weight `30`.
+- `extraction_health`: penalty for non-fatal extraction warnings, weight `10`.
+
+The report surfaces the overall score and remaining gaps. A high score means the configured pipeline covered the detected evidence well; it does not prove that every chart interpretation or document claim is correct.
 
 ## Revision Markers In Markdown
 

@@ -496,6 +496,69 @@ def append_visual_markdown(manifest: dict[str, Any], out_dir: Path, messages: li
     atomic_write_text(full_path, base.rstrip() + "\n" + "\n".join(lines).rstrip() + "\n")
 
 
+def update_completeness_score(manifest: dict[str, Any], enable_openai: bool) -> dict[str, Any]:
+    structure = manifest.get("structure", [])
+    tables = manifest.get("tables", [])
+    warnings = manifest.get("warnings", [])
+    visual = manifest.get("visual_findings", [])
+    required_visual = [item for item in visual if item.get("requires_visual_review")]
+    weak_backends = {"", "ooxml", "ooxml-media", "visual-unavailable"}
+    understood_visual = [
+        item
+        for item in required_visual
+        if item.get("ocr_text") or (item.get("vision_summary") and item.get("backend", "") not in weak_backends)
+    ]
+
+    textual_score = 100 if structure else 0
+    table_score = 100
+    visual_score = 100 if not required_visual else round(100 * len(understood_visual) / len(required_visual))
+    health_score = max(0, 100 - 10 * len(warnings))
+    components = {
+        "textual_structure": {
+            "score": textual_score,
+            "weight": 45,
+            "extracted_item_count": len(structure),
+        },
+        "table_extraction": {
+            "score": table_score,
+            "weight": 15,
+            "extracted_table_count": len(tables),
+        },
+        "visual_review": {
+            "score": visual_score,
+            "weight": 30,
+            "required_item_count": len(required_visual),
+            "understood_item_count": len(understood_visual),
+        },
+        "extraction_health": {
+            "score": health_score,
+            "weight": 10,
+            "warning_count": len(warnings),
+        },
+    }
+    score = round(sum(item["score"] * item["weight"] for item in components.values()) / 100)
+    gaps: list[str] = []
+    if not structure:
+        gaps.append("No readable body or slide structure was extracted.")
+    unresolved_visual = len(required_visual) - len(understood_visual)
+    if unresolved_visual:
+        gaps.append(f"{unresolved_visual} visual item(s) still require OCR or visual confirmation.")
+    if warnings:
+        gaps.append(f"{len(warnings)} extraction warning(s) should be reviewed.")
+    visual_status = manifest.get("visual_analysis", {}).get("status")
+    if required_visual and visual_status in {"skipped", "partial"}:
+        gaps.append(f"Visual analysis status is {visual_status}; use a deeper mode or additional backends for higher confidence.")
+    result = {
+        "score": score,
+        "grade": "high" if score >= 90 else "medium" if score >= 70 else "low",
+        "components": components,
+        "openai_vision_enabled": enable_openai,
+        "remaining_gaps": gaps,
+    }
+    manifest["completeness_score"] = result
+    return result
+
+
 def enrich_manifest(
     manifest_path: Path,
     normalized_file: Path,
@@ -531,6 +594,7 @@ def enrich_manifest(
             item["vision_summary"] = item.get("vision_summary") or item.get("reason", "")
         analysis["status"] = "skipped"
         manifest["visual_analysis"] = analysis
+        update_completeness_score(manifest, enable_openai)
         append_visual_markdown(manifest, out_dir, messages)
         write_json(manifest_path, manifest)
         return manifest
@@ -606,6 +670,7 @@ def enrich_manifest(
             messages.append("No visual work items were selected.")
     manifest["visual_analysis"] = analysis
     manifest.setdefault("artifacts", {})["visual_cache_dir"] = str(cache_dir)
+    update_completeness_score(manifest, enable_openai)
     append_visual_markdown(manifest, out_dir, messages)
     write_json(manifest_path, manifest)
     return manifest

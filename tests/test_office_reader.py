@@ -33,6 +33,10 @@ READ_OFFICE_SPEC = importlib.util.spec_from_file_location("read_office", SCRIPTS
 read_office = importlib.util.module_from_spec(READ_OFFICE_SPEC)
 assert READ_OFFICE_SPEC.loader
 READ_OFFICE_SPEC.loader.exec_module(read_office)
+ASSEMBLE_REPORT_SPEC = importlib.util.spec_from_file_location("assemble_report", SCRIPTS_DIR / "assemble_report.py")
+assemble_report = importlib.util.module_from_spec(ASSEMBLE_REPORT_SPEC)
+assert ASSEMBLE_REPORT_SPEC.loader
+ASSEMBLE_REPORT_SPEC.loader.exec_module(assemble_report)
 
 
 def write_zip(path, files):
@@ -1099,6 +1103,62 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(visual["mode"], "fast")
             self.assertEqual(visual["rendered_page_count"], 0)
             self.assertIn("fast mode", " ".join(visual["messages"]).lower())
+
+    def test_completeness_score_reports_unconfirmed_visual_gap(self):
+        manifest = {
+            "structure": [{"type": "paragraph", "text": "Body"}],
+            "tables": [],
+            "warnings": [],
+            "visual_analysis": {"status": "skipped"},
+            "visual_findings": [
+                {
+                    "requires_visual_review": True,
+                    "reason": "embedded diagram",
+                    "backend": "ooxml-media",
+                    "vision_summary": "embedded diagram",
+                    "ocr_text": "",
+                }
+            ],
+        }
+
+        score = visual_analysis.update_completeness_score(manifest, enable_openai=False)
+
+        self.assertLess(score["score"], 100)
+        self.assertEqual(score["components"]["visual_review"]["required_item_count"], 1)
+        self.assertEqual(score["components"]["visual_review"]["understood_item_count"], 0)
+        self.assertTrue(any("visual" in gap.lower() for gap in score["remaining_gaps"]))
+        self.assertFalse(score["openai_vision_enabled"])
+
+    def test_report_includes_explainable_completeness_score(self):
+        manifest = {
+            "source": {"name": "sample.docx"},
+            "document_type": "docx",
+            "structure": [{"type": "paragraph", "text": "Body"}],
+            "tables": [],
+            "comments": [],
+            "revisions": [],
+            "notes": [],
+            "warnings": [],
+            "visual_analysis": {"status": "completed"},
+            "visual_findings": [],
+            "completeness_score": {
+                "score": 95,
+                "grade": "high",
+                "components": {
+                    "textual_structure": {"score": 100, "weight": 45},
+                    "table_extraction": {"score": 100, "weight": 15},
+                    "visual_review": {"score": 85, "weight": 30},
+                    "extraction_health": {"score": 100, "weight": 10},
+                },
+                "remaining_gaps": ["One diagram still needs confirmation."],
+            },
+        }
+
+        report = assemble_report.build_report(manifest)
+
+        self.assertIn("- Reading completeness: 95/100 (high)", report)
+        self.assertIn("## Reading Completeness", report)
+        self.assertIn("One diagram still needs confirmation.", report)
 
     def test_visual_enrichment_does_not_write_markdown_outside_output_directory(self):
         with tempfile.TemporaryDirectory() as tmp:

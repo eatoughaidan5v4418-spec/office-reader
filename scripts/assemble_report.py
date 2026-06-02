@@ -34,6 +34,7 @@ def build_report(manifest: dict[str, Any]) -> str:
     warnings = manifest.get("warnings", [])
     visual = manifest.get("visual_findings", [])
     visual_analysis = manifest.get("visual_analysis", {})
+    completeness = manifest.get("completeness_score", {})
     conversion = manifest.get("conversion", {})
 
     lines: list[str] = [f"# Structured Reading Report: {name}", ""]
@@ -50,9 +51,33 @@ def build_report(manifest: dict[str, Any]) -> str:
             bullet("Conversion status", conversion.get("status", "unknown")),
             bullet("Reading mode", manifest.get("reading_mode", "balanced")),
             bullet("Visual analysis", visual_analysis.get("status", "unknown")),
+            bullet(
+                "Reading completeness",
+                f"{completeness.get('score')}/100 ({completeness.get('grade')})" if completeness else "not scored",
+            ),
             "",
         ]
     )
+
+    lines.extend(["## Reading Completeness", ""])
+    if completeness:
+        lines.append(bullet("Overall score", f"{completeness.get('score')}/100 ({completeness.get('grade')})"))
+        for name, component in completeness.get("components", {}).items():
+            lines.append(
+                bullet(
+                    name.replace("_", " ").title(),
+                    f"{component.get('score', 0)}/100, weight {component.get('weight', 0)}%",
+                )
+            )
+        gaps = completeness.get("remaining_gaps", [])
+        if gaps:
+            lines.append("- Remaining gaps:")
+            lines.extend(f"  - {gap}" for gap in gaps)
+        else:
+            lines.append("- Remaining gaps: none recorded.")
+    else:
+        lines.append("- Completeness score was not recorded.")
+    lines.append("")
 
     lines.extend(["## Outline", ""])
     if structure:

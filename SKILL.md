@@ -20,6 +20,7 @@ Use this skill to turn Word and PowerPoint files into a full Markdown transcript
 5. Enrich visuals with `python scripts/visual_analysis.py <manifest> --normalized-file <file.docx|pptx> --out-dir <out-dir> --mode balanced`.
 6. Build the report with `python scripts/assemble_report.py <basename>.manifest.json`.
 7. Read the manifest and report before answering the user. Call out visual-review gaps whenever preview rendering, OCR, or OpenAI vision was skipped or failed.
+8. Use `completeness_score` as a coverage signal: report the score and remaining gaps, but do not treat a high score as proof that every extracted fact is correct.
 
 ## Reading Modes
 

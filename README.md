@@ -10,6 +10,8 @@ It reads `.doc`, `.docx`, `.ppt`, and `.pptx` into:
 
 The default path is Microsoft Office COM first for legacy conversion and rendering, then optional WPS for legacy conversion, then LibreOffice. After a Word COM preview timeout, modern DOCX preview remembers the local slowdown for seven days and tries LibreOffice first; legacy conversion order stays unchanged. Visual deep reading combines OOXML extraction, rendered page/slide analysis, local OCR, optional OpenAI vision, and cache reuse.
 
+Each enriched manifest and structured report includes an explainable `completeness_score` with textual, table, visual-review, and extraction-health components plus remaining gaps. The score reports reading coverage, not factual certainty.
+
 Legacy `.doc` and `.ppt` conversion runs each backend in an isolated worker. A backend that exceeds the default 45-second budget is stopped before the reader continues to the next fallback.
 
 ## Quick Start
