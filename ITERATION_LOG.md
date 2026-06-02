@@ -1,5 +1,39 @@
 # Office Reader Iteration Log
 
+## 2026-06-02 - DOCX block-level content controls
+
+### Problems Found
+
+- Block-level Word content controls (`w:sdt`) were skipped because `read_docx.py` only processed direct paragraph/table children.
+- Template/report fields inside `w:sdtContent` could omit paragraphs, tables, comments, revisions, and media references.
+
+### Changes Completed
+
+- Added recursive processing for block-level `w:sdt/w:sdtContent`.
+- Tagged extracted paragraphs, tables, comments, revisions, and media relationships from content controls with `container: content_control`.
+- Added a synthetic DOCX regression fixture with a content-control paragraph, table, insertion revision, comment reference, and image relationship.
+- Updated `SKILL.md` and `references/output_schema.md`.
+
+### Verification
+
+- Focused tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_block_level_content_controls tests.test_office_reader.OfficeReaderTests.test_docx_reader_outputs_markdown_and_manifest -v`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 25 tests
+
+### Remaining Risks
+
+- Textboxes and shape-originated text still need first-class origin metadata.
+- Comment range anchors are still not captured as `anchor_text`.
+- Move revisions (`w:moveFrom`, `w:moveTo`) are not yet modeled separately.
+
+### Next Round Direction
+
+- Add textbox-origin detection for DOCX paragraphs/media, then improve comment range anchors.
+
 ## 2026-06-02 - DOCX supplemental part extraction
 
 ### Problems Found

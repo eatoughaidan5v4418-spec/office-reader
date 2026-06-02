@@ -123,6 +123,45 @@ def make_docx_with_supplemental_parts(path):
     write_zip(path, files)
 
 
+def make_docx_with_content_control(path):
+    files = {
+        "word/document.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:sdt>
+      <w:sdtPr><w:tag w:val="approval"/></w:sdtPr>
+      <w:sdtContent>
+        <w:p>
+          <w:r><w:t>Controlled approval text </w:t></w:r>
+          <w:ins w:author="Approver" w:date="2026-03-01T00:00:00Z"><w:r><w:t>accepted</w:t></w:r></w:ins>
+          <w:r><w:commentReference w:id="2"/></w:r>
+          <w:r><w:drawing><a:blip r:embed="rIdControlledImage"/></w:drawing></w:r>
+        </w:p>
+        <w:tbl>
+          <w:tr><w:tc><w:p><w:r><w:t>Field</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Value</w:t></w:r></w:p></w:tc></w:tr>
+          <w:tr><w:tc><w:p><w:r><w:t>Decision</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Go</w:t></w:r></w:p></w:tc></w:tr>
+        </w:tbl>
+      </w:sdtContent>
+    </w:sdt>
+  </w:body>
+</w:document>""",
+        "word/comments.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:comment w:id="2" w:author="Template Reviewer" w:date="2026-03-02T00:00:00Z">
+    <w:p><w:r><w:t>Controlled text needs signoff.</w:t></w:r></w:p>
+  </w:comment>
+</w:comments>""",
+        "word/_rels/document.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdControlledImage" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/controlled.png"/>
+</Relationships>""",
+        "word/media/controlled.png": b"fake image bytes",
+    }
+    write_zip(path, files)
+
+
 def make_pptx(path):
     files = {
         "ppt/presentation.xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -316,6 +355,39 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(header_media["target"], "word/media/header.png")
             self.assertEqual(header_media["part_type"], "header")
             self.assertEqual(header_media["part"], "word/header1.xml")
+
+    def test_docx_reader_extracts_block_level_content_controls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "content-control.docx"
+            out_dir = tmp_path / "out"
+            make_docx_with_content_control(source)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+
+            full_md = (out_dir / "content-control.full.md").read_text(encoding="utf-8")
+            manifest = json.loads((out_dir / "content-control.manifest.json").read_text(encoding="utf-8"))
+            self.assertIn("Controlled approval text", full_md)
+            self.assertIn("| Field | Value |", full_md)
+
+            controlled = next(item for item in manifest["structure"] if "Controlled approval text" in item["text"])
+            self.assertEqual(controlled["container"], "content_control")
+            self.assertEqual(controlled["part_type"], "document")
+
+            table = next(item for item in manifest["tables"] if item["rows"][1] == ["Decision", "Go"])
+            self.assertEqual(table["container"], "content_control")
+
+            revision = next(item for item in manifest["revisions"] if item["text"] == "accepted")
+            self.assertEqual(revision["container"], "content_control")
+
+            comment = next(item for item in manifest["comments"] if item["id"] == "2")
+            self.assertEqual(comment["container"], "content_control")
+            self.assertEqual(comment["text"], "Controlled text needs signoff.")
+
+            relationships = manifest["visual_findings"][0]["relationships"]
+            controlled_media = next(item for item in relationships if item["relationship_id"] == "rIdControlledImage")
+            self.assertEqual(controlled_media["container"], "content_control")
+            self.assertEqual(controlled_media["target"], "word/media/controlled.png")
 
     def test_pptx_reader_extracts_slides_notes_comments_and_tables(self):
         with tempfile.TemporaryDirectory() as tmp:

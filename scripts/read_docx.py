@@ -143,30 +143,41 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
         def process_part(part_type: str, part_path: str, container, part_rels: dict[str, dict[str, str]], label: str = "") -> None:
             nonlocal paragraph_index, table_index
             added_part_heading = False
-            for child in block_children(container):
+            def base_location(extra_location: dict[str, str] | None = None) -> dict[str, str]:
+                location = {"part_type": part_type, "part": part_path}
+                if extra_location:
+                    location.update(extra_location)
+                return location
+
+            def ensure_part_heading() -> None:
+                nonlocal added_part_heading
+                if part_type != "document" and not added_part_heading:
+                    markdown.append(md_heading(label or part_type.title(), 2))
+                    added_part_heading = True
+
+            def process_child(child, extra_location: dict[str, str] | None = None) -> None:
+                nonlocal paragraph_index, table_index
                 tag = child.tag
                 if tag == qn("w", "p"):
                     text, revisions = paragraph_text_with_revisions(child)
                     if not text and not list(child.iter(qn("w", "drawing"))):
-                        continue
-                    if part_type != "document" and not added_part_heading:
-                        markdown.append(md_heading(label or part_type.title(), 2))
-                        added_part_heading = True
+                        return
+                    ensure_part_heading()
                     paragraph_index += 1
                     level = heading_level(child) if part_type == "document" else None
                     refs = extract_comment_refs(child)
+                    location = base_location(extra_location)
                     item = {
                         "type": "heading" if level else "paragraph",
                         "index": paragraph_index,
                         "level": level,
                         "text": text,
                         "comment_ids": refs,
-                        "part_type": part_type,
-                        "part": part_path,
+                        **location,
                     }
                     manifest["structure"].append(item)
                     for revision in revisions:
-                        revision.update({"paragraph_index": paragraph_index, "part_type": part_type, "part": part_path})
+                        revision.update({"paragraph_index": paragraph_index, **location})
                         manifest["revisions"].append(revision)
 
                     if level:
@@ -176,28 +187,27 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                     for ref_id in refs:
                         comment = comments_by_id.get(ref_id)
                         if comment:
-                            comment.update({"part_type": part_type, "part": part_path, "paragraph_index": paragraph_index})
+                            comment.update({"paragraph_index": paragraph_index, **location})
                             markdown.append(f"> Comment {ref_id}: {comment['text']}")
 
                     for blip in child.iter(qn("a", "blip")):
                         rel_id = blip.attrib.get(R_EMBED)
                         target = resolved_relationship_target(part_path, part_rels, rel_id)
                         if target:
-                            media_refs.append({"relationship_id": rel_id or "", "target": target, "part_type": part_type, "part": part_path})
+                            media_refs.append({"relationship_id": rel_id or "", "target": target, **location})
 
                 elif tag == qn("w", "tbl"):
-                    if part_type != "document" and not added_part_heading:
-                        markdown.append(md_heading(label or part_type.title(), 2))
-                        added_part_heading = True
+                    ensure_part_heading()
                     table_index += 1
                     rows = table_to_rows(child, "w:tc", "w:tr")
-                    table_entry = {"index": table_index, "rows": rows, "part_type": part_type, "part": part_path}
+                    part_location = base_location(extra_location)
+                    table_entry = {"index": table_index, "rows": rows, **part_location}
                     manifest["tables"].append(table_entry)
                     markdown.append(f"Table {table_index}")
                     markdown.append(markdown_table(rows))
                     for row_index, row in enumerate(child.findall("w:tr", NS), start=1):
                         for cell_index, cell in enumerate(row.findall("w:tc", NS), start=1):
-                            location = {**table_cell_location(table_index, row_index, cell_index), "part_type": part_type, "part": part_path}
+                            location = {**table_cell_location(table_index, row_index, cell_index), **part_location}
                             for paragraph in cell.findall(".//w:p", NS):
                                 _text, revisions = paragraph_text_with_revisions(paragraph)
                                 for revision in revisions:
@@ -212,6 +222,15 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                                     target = resolved_relationship_target(part_path, part_rels, rel_id)
                                     if target:
                                         media_refs.append({"relationship_id": rel_id or "", "target": target, **location})
+                elif tag == qn("w", "sdt"):
+                    sdt_content = child.find("w:sdtContent", NS)
+                    if sdt_content is not None:
+                        nested_location = {**(extra_location or {}), "container": "content_control"}
+                        for nested_child in block_children(sdt_content):
+                            process_child(nested_child, nested_location)
+
+            for child in block_children(container):
+                process_child(child)
 
         process_part("document", "word/document.xml", body, rels)
 
