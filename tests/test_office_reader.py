@@ -35,7 +35,16 @@ def make_docx(path):
     </w:p>
     <w:tbl>
       <w:tr><w:tc><w:p><w:r><w:t>Metric</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Value</w:t></w:r></w:p></w:tc></w:tr>
-      <w:tr><w:tc><w:p><w:r><w:t>ARR</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>$10M</w:t></w:r></w:p></w:tc></w:tr>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>ARR</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p>
+          <w:r><w:t>$10M</w:t></w:r>
+          <w:ins w:author="Table Reviewer" w:date="2026-01-05T00:00:00Z"><w:r><w:t> verified</w:t></w:r></w:ins>
+          <w:del w:author="Table Reviewer" w:date="2026-01-06T00:00:00Z"><w:r><w:delText> draft</w:delText></w:r></w:del>
+          <w:r><w:commentReference w:id="1"/></w:r>
+          <w:r><w:drawing><a:blip xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" r:embed="rIdImage2"/></w:drawing></w:r>
+        </w:p></w:tc>
+      </w:tr>
     </w:tbl>
     <w:p><w:r><w:drawing><a:blip xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" r:embed="rIdImage1"/></w:drawing></w:r></w:p>
   </w:body>
@@ -45,10 +54,14 @@ def make_docx(path):
   <w:comment w:id="0" w:author="Reviewer" w:date="2026-01-04T00:00:00Z">
     <w:p><w:r><w:t>Please verify the ARR source.</w:t></w:r></w:p>
   </w:comment>
+  <w:comment w:id="1" w:author="Table Reviewer" w:date="2026-01-05T00:00:00Z">
+    <w:p><w:r><w:t>Table value needs audit trail.</w:t></w:r></w:p>
+  </w:comment>
 </w:comments>""",
         "word/_rels/document.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rIdImage1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+  <Relationship Id="rIdImage2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image2.png"/>
 </Relationships>""",
         "docProps/core.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
@@ -141,7 +154,20 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(manifest["document_type"], "docx")
             self.assertEqual(manifest["comments"][0]["text"], "Please verify the ARR source.")
             self.assertEqual(manifest["revisions"][0]["type"], "insertion")
-            self.assertEqual(manifest["tables"][0]["rows"][1], ["ARR", "$10M"])
+            self.assertEqual(manifest["tables"][0]["rows"][1], ["ARR", "$10M verified draft"])
+            table_comment = next(item for item in manifest["comments"] if item["id"] == "1")
+            self.assertEqual(table_comment["table_index"], 1)
+            self.assertEqual(table_comment["row_index"], 2)
+            self.assertEqual(table_comment["cell_index"], 2)
+            table_revision = next(item for item in manifest["revisions"] if item["text"] == "verified")
+            self.assertEqual(table_revision["table_index"], 1)
+            self.assertEqual(table_revision["row_index"], 2)
+            self.assertEqual(table_revision["cell_index"], 2)
+            relationships = manifest["visual_findings"][0]["relationships"]
+            table_media = next(item for item in relationships if item["relationship_id"] == "rIdImage2")
+            self.assertEqual(table_media["table_index"], 1)
+            self.assertEqual(table_media["row_index"], 2)
+            self.assertEqual(table_media["cell_index"], 2)
             self.assertTrue(manifest["visual_findings"][0]["requires_visual_review"])
 
     def test_pptx_reader_extracts_slides_notes_comments_and_tables(self):
@@ -225,7 +251,7 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertTrue((out_dir / "board-memo.manifest.json").exists())
             report = (out_dir / "board-memo.report.md").read_text(encoding="utf-8")
             self.assertIn("# Structured Reading Report: board-memo.docx", report)
-            self.assertIn("- Comments: 1", report)
+            self.assertIn("- Comments: 2", report)
 
     def test_unified_reader_stdout_json_is_utf8_safe_for_chinese_paths(self):
         with tempfile.TemporaryDirectory(prefix="office-reader-") as tmp:

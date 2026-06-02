@@ -14,8 +14,8 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `metadata`: package metadata from `docProps/core.xml` when present.
 - `structure`: paragraphs/headings for Word or ordered slides for PowerPoint.
 - `tables`: extracted table rows with document or slide location.
-- `comments`: Word comments or PowerPoint comments.
-- `revisions`: Word tracked insertions and deletions.
+- `comments`: Word comments or PowerPoint comments. Word comments referenced inside a table cell may include `table_index`, `row_index`, and `cell_index`.
+- `revisions`: Word tracked insertions and deletions. Word revisions inside a table cell may include `table_index`, `row_index`, and `cell_index`.
 - `notes`: PowerPoint speaker notes.
 - `visual_analysis`: visual pipeline status, selected mode, rendered page count, analyzed item count, cache hits, backends, and messages.
 - `visual_findings`: flags for media, drawings, image-heavy content, OCR text, rendered-page observations, vision summaries, diagram summaries, confidence, backend, duration, and cache status.
@@ -40,6 +40,8 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `backend`: `rapidocr`, `tesseract`, `openai:<model>`, `ooxml-media`, or a combination.
 - `duration_ms`: elapsed time for this item.
 - `cache_hit`: whether this result came from `.office-reader-cache`.
+
+For DOCX media relationships found inside a table cell, entries under `visual_findings[].relationships` may include `table_index`, `row_index`, and `cell_index`.
 
 If these fields are empty, the report must list the visual gap instead of claiming the image content was fully read.
 

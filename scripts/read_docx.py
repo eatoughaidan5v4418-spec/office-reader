@@ -69,6 +69,10 @@ def extract_comment_refs(paragraph) -> list[str]:
     return ids
 
 
+def table_cell_location(table_index: int, row_index: int, cell_index: int) -> dict[str, int]:
+    return {"table_index": table_index, "row_index": row_index, "cell_index": cell_index}
+
+
 def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
     manifest = default_manifest(source, "docx")
     markdown: list[str] = []
@@ -133,6 +137,24 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                 manifest["tables"].append(table_entry)
                 markdown.append(f"Table {table_index}")
                 markdown.append(markdown_table(rows))
+                for row_index, row in enumerate(child.findall("w:tr", NS), start=1):
+                    for cell_index, cell in enumerate(row.findall("w:tc", NS), start=1):
+                        location = table_cell_location(table_index, row_index, cell_index)
+                        for paragraph in cell.findall(".//w:p", NS):
+                            _text, revisions = paragraph_text_with_revisions(paragraph)
+                            for revision in revisions:
+                                revision.update(location)
+                                manifest["revisions"].append(revision)
+                            for ref_id in extract_comment_refs(paragraph):
+                                comment = comments_by_id.get(ref_id)
+                                if comment:
+                                    comment.update(location)
+                            for blip in paragraph.iter(qn("a", "blip")):
+                                rel_id = blip.attrib.get(R_EMBED)
+                                rel = rels.get(rel_id or "")
+                                target = rel.get("target", "") if rel else ""
+                                if target:
+                                    media_refs.append({"relationship_id": rel_id or "", "target": target, **location})
 
         package_media = media_members(package, "word/media/")
         if package_media or media_refs:
