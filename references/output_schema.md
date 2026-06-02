@@ -12,7 +12,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `document_type`: `docx` or `pptx`.
 - `reading_mode`: `fast`, `balanced`, or `complete`.
 - `metadata`: package metadata from `docProps/core.xml` when present.
-- `structure`: paragraphs/headings for Word or ordered slides for PowerPoint. Word entries may include `part_type` and `part` for non-body sources such as headers, footers, footnotes, and endnotes, and `container: content_control` when text came from a block-level content control.
+- `structure`: paragraphs/headings for Word or ordered slides for PowerPoint. Word entries may include `part_type` and `part` for non-body sources such as headers, footers, footnotes, and endnotes, and `container` values such as `content_control` or `textbox` when text came from those containers.
 - `tables`: extracted table rows with document, slide, or Word part location.
 - `comments`: Word comments or PowerPoint comments. Word comments referenced inside a table cell may include `table_index`, `row_index`, `cell_index`, `part_type`, and `part`.
 - `revisions`: Word tracked insertions and deletions. Word revisions inside a table cell may include `table_index`, `row_index`, `cell_index`, `part_type`, and `part`.
@@ -41,7 +41,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `duration_ms`: elapsed time for this item.
 - `cache_hit`: whether this result came from `.office-reader-cache`.
 
-For DOCX media relationships found in the body, a non-body Word part, a table cell, or a block-level content control, entries under `visual_findings[].relationships` may include `part_type`, `part`, `container`, `table_index`, `row_index`, and `cell_index`.
+For DOCX media relationships found in the body, a non-body Word part, a table cell, a block-level content control, or a textbox, entries under `visual_findings[].relationships` may include `part_type`, `part`, `container`, `table_index`, `row_index`, and `cell_index`.
 
 For PPTX slides, entries under `visual_findings[].objects` may include a structured visual object inventory:
 

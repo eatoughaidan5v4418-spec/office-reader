@@ -1,5 +1,42 @@
 # Office Reader Iteration Log
 
+## 2026-06-02 - DOCX textbox origin metadata
+
+### Problems Found
+
+- Text inside `w:txbxContent` could be folded into the outer paragraph by recursive text extraction.
+- Textbox comments, revisions, and image relationships could lose their true shape/textbox origin.
+- Outer paragraphs that hosted a textbox could duplicate textbox text or media in the wrong location.
+
+### Changes Completed
+
+- Added optional subtree skipping to `paragraph_text_with_revisions()` so callers can avoid mixing textbox content into the outer paragraph.
+- Added DOCX textbox block extraction from `w:txbxContent`.
+- Tagged textbox-originated paragraphs, revisions, comments, and media relationships with `container: textbox`.
+- Added subtree-aware comment and image scanning so outer paragraphs do not duplicate textbox references.
+- Added a synthetic DOCX regression fixture with outer text, textbox text, insertion revision, comment reference, and textbox image relationship.
+- Updated `SKILL.md` and `references/output_schema.md`.
+
+### Verification
+
+- Focused tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_textbox_content_with_origin tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_block_level_content_controls tests.test_office_reader.OfficeReaderTests.test_docx_reader_outputs_markdown_and_manifest -v`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 26 tests
+
+### Remaining Risks
+
+- Comment range anchors are still not captured as `anchor_text`.
+- Move revisions (`w:moveFrom`, `w:moveTo`) are not yet modeled separately.
+- DOCX drawing geometry/alt text for images is still less detailed than PPTX visual object inventory.
+
+### Next Round Direction
+
+- Add DOCX comment range anchor text extraction, then model move revisions.
+
 ## 2026-06-02 - DOCX block-level content controls
 
 ### Problems Found

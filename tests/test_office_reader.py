@@ -162,6 +162,42 @@ def make_docx_with_content_control(path):
     write_zip(path, files)
 
 
+def make_docx_with_textbox(path):
+    files = {
+        "word/document.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+            xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Outer paragraph only.</w:t></w:r>
+      <w:r><w:drawing><wps:txbx><w:txbxContent>
+        <w:p>
+          <w:r><w:t>Textbox risk note </w:t></w:r>
+          <w:ins w:author="Shape Reviewer" w:date="2026-04-01T00:00:00Z"><w:r><w:t>approved</w:t></w:r></w:ins>
+          <w:r><w:commentReference w:id="4"/></w:r>
+          <w:r><w:drawing><a:blip r:embed="rIdTextboxImage"/></w:drawing></w:r>
+        </w:p>
+      </w:txbxContent></wps:txbx></w:drawing></w:r>
+    </w:p>
+  </w:body>
+</w:document>""",
+        "word/comments.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:comment w:id="4" w:author="Shape Reviewer" w:date="2026-04-02T00:00:00Z">
+    <w:p><w:r><w:t>Textbox needs visual review.</w:t></w:r></w:p>
+  </w:comment>
+</w:comments>""",
+        "word/_rels/document.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdTextboxImage" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/textbox.png"/>
+</Relationships>""",
+        "word/media/textbox.png": b"fake image bytes",
+    }
+    write_zip(path, files)
+
+
 def make_pptx(path):
     files = {
         "ppt/presentation.xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -388,6 +424,40 @@ class OfficeReaderTests(unittest.TestCase):
             controlled_media = next(item for item in relationships if item["relationship_id"] == "rIdControlledImage")
             self.assertEqual(controlled_media["container"], "content_control")
             self.assertEqual(controlled_media["target"], "word/media/controlled.png")
+
+    def test_docx_reader_extracts_textbox_content_with_origin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "textbox.docx"
+            out_dir = tmp_path / "out"
+            make_docx_with_textbox(source)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+
+            full_md = (out_dir / "textbox.full.md").read_text(encoding="utf-8")
+            manifest = json.loads((out_dir / "textbox.manifest.json").read_text(encoding="utf-8"))
+            self.assertIn("Outer paragraph only.", full_md)
+            self.assertIn("Textbox risk note", full_md)
+
+            outer = next(item for item in manifest["structure"] if item["text"] == "Outer paragraph only.")
+            self.assertNotIn("container", outer)
+            self.assertNotIn("Textbox risk note", outer["text"])
+
+            textbox = next(item for item in manifest["structure"] if "Textbox risk note" in item["text"])
+            self.assertEqual(textbox["container"], "textbox")
+            self.assertIn("{+approved+}", textbox["text"])
+
+            revision = next(item for item in manifest["revisions"] if item["text"] == "approved")
+            self.assertEqual(revision["container"], "textbox")
+
+            comment = next(item for item in manifest["comments"] if item["id"] == "4")
+            self.assertEqual(comment["container"], "textbox")
+            self.assertEqual(comment["text"], "Textbox needs visual review.")
+
+            relationships = manifest["visual_findings"][0]["relationships"]
+            textbox_media = next(item for item in relationships if item["relationship_id"] == "rIdTextboxImage")
+            self.assertEqual(textbox_media["container"], "textbox")
+            self.assertEqual(textbox_media["target"], "word/media/textbox.png")
 
     def test_pptx_reader_extracts_slides_notes_comments_and_tables(self):
         with tempfile.TemporaryDirectory() as tmp:

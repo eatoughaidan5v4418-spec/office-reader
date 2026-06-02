@@ -31,6 +31,9 @@ from common_ooxml import (
 )
 
 
+TEXTBOX_SKIP_NAMES = {"txbxContent"}
+
+
 def heading_level(paragraph) -> int | None:
     style = paragraph.find("w:pPr/w:pStyle", NS)
     if style is None:
@@ -61,13 +64,34 @@ def extract_comments(package: zipfile.ZipFile) -> list[dict[str, Any]]:
     return comments
 
 
-def extract_comment_refs(paragraph) -> list[str]:
+def local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
+def iter_without_subtrees(element, skip_subtree_names: set[str]):
+    if local_name(element.tag) in skip_subtree_names:
+        return
+    yield element
+    for child in list(element):
+        yield from iter_without_subtrees(child, skip_subtree_names)
+
+
+def extract_comment_refs(paragraph, skip_subtree_names: set[str] | None = None) -> list[str]:
     ids = []
-    for ref in paragraph.iter(qn("w", "commentReference")):
+    nodes = iter_without_subtrees(paragraph, skip_subtree_names or set())
+    for ref in nodes:
+        if ref.tag != qn("w", "commentReference"):
+            continue
         ref_id = ref.attrib.get(W_ID)
         if ref_id is not None:
             ids.append(ref_id)
     return ids
+
+
+def iter_blips(element, skip_subtree_names: set[str] | None = None):
+    for node in iter_without_subtrees(element, skip_subtree_names or set()):
+        if node.tag == qn("a", "blip"):
+            yield node
 
 
 def table_cell_location(table_index: int, row_index: int, cell_index: int) -> dict[str, int]:
@@ -120,6 +144,15 @@ def fixed_note_parts(package: zipfile.ZipFile) -> list[tuple[str, str, str]]:
     return parts
 
 
+def textbox_blocks(container) -> list[Any]:
+    blocks = []
+    for node in container.iter():
+        if node.tag.rsplit("}", 1)[-1] != "txbxContent":
+            continue
+        blocks.extend(block_children(node))
+    return blocks
+
+
 def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
     manifest = default_manifest(source, "docx")
     markdown: list[str] = []
@@ -157,44 +190,49 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
 
             def process_child(child, extra_location: dict[str, str] | None = None) -> None:
                 nonlocal paragraph_index, table_index
+                skip_names = set() if (extra_location or {}).get("container") == "textbox" else TEXTBOX_SKIP_NAMES
                 tag = child.tag
                 if tag == qn("w", "p"):
-                    text, revisions = paragraph_text_with_revisions(child)
+                    text, revisions = paragraph_text_with_revisions(child, skip_subtree_names=skip_names)
                     if not text and not list(child.iter(qn("w", "drawing"))):
-                        return
-                    ensure_part_heading()
-                    paragraph_index += 1
-                    level = heading_level(child) if part_type == "document" else None
-                    refs = extract_comment_refs(child)
-                    location = base_location(extra_location)
-                    item = {
-                        "type": "heading" if level else "paragraph",
-                        "index": paragraph_index,
-                        "level": level,
-                        "text": text,
-                        "comment_ids": refs,
-                        **location,
-                    }
-                    manifest["structure"].append(item)
-                    for revision in revisions:
-                        revision.update({"paragraph_index": paragraph_index, **location})
-                        manifest["revisions"].append(revision)
+                        pass
+                    else:
+                        ensure_part_heading()
+                        paragraph_index += 1
+                        level = heading_level(child) if part_type == "document" else None
+                        refs = extract_comment_refs(child, skip_subtree_names=skip_names)
+                        location = base_location(extra_location)
+                        item = {
+                            "type": "heading" if level else "paragraph",
+                            "index": paragraph_index,
+                            "level": level,
+                            "text": text,
+                            "comment_ids": refs,
+                            **location,
+                        }
+                        manifest["structure"].append(item)
+                        for revision in revisions:
+                            revision.update({"paragraph_index": paragraph_index, **location})
+                            manifest["revisions"].append(revision)
 
-                    if level:
-                        markdown.append(md_heading(text, level))
-                    elif text:
-                        markdown.append(text)
-                    for ref_id in refs:
-                        comment = comments_by_id.get(ref_id)
-                        if comment:
-                            comment.update({"paragraph_index": paragraph_index, **location})
-                            markdown.append(f"> Comment {ref_id}: {comment['text']}")
+                        if level:
+                            markdown.append(md_heading(text, level))
+                        elif text:
+                            markdown.append(text)
+                        for ref_id in refs:
+                            comment = comments_by_id.get(ref_id)
+                            if comment:
+                                comment.update({"paragraph_index": paragraph_index, **location})
+                                markdown.append(f"> Comment {ref_id}: {comment['text']}")
 
-                    for blip in child.iter(qn("a", "blip")):
-                        rel_id = blip.attrib.get(R_EMBED)
-                        target = resolved_relationship_target(part_path, part_rels, rel_id)
-                        if target:
-                            media_refs.append({"relationship_id": rel_id or "", "target": target, **location})
+                        for blip in iter_blips(child, skip_subtree_names=skip_names):
+                            rel_id = blip.attrib.get(R_EMBED)
+                            target = resolved_relationship_target(part_path, part_rels, rel_id)
+                            if target:
+                                media_refs.append({"relationship_id": rel_id or "", "target": target, **location})
+                    for textbox_child in textbox_blocks(child):
+                        textbox_location = {**(extra_location or {}), "container": "textbox"}
+                        process_child(textbox_child, textbox_location)
 
                 elif tag == qn("w", "tbl"):
                     ensure_part_heading()
@@ -209,19 +247,22 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                         for cell_index, cell in enumerate(row.findall("w:tc", NS), start=1):
                             location = {**table_cell_location(table_index, row_index, cell_index), **part_location}
                             for paragraph in cell.findall(".//w:p", NS):
-                                _text, revisions = paragraph_text_with_revisions(paragraph)
+                                _text, revisions = paragraph_text_with_revisions(paragraph, skip_subtree_names=TEXTBOX_SKIP_NAMES)
                                 for revision in revisions:
                                     revision.update(location)
                                     manifest["revisions"].append(revision)
-                                for ref_id in extract_comment_refs(paragraph):
+                                for ref_id in extract_comment_refs(paragraph, skip_subtree_names=TEXTBOX_SKIP_NAMES):
                                     comment = comments_by_id.get(ref_id)
                                     if comment:
                                         comment.update(location)
-                                for blip in paragraph.iter(qn("a", "blip")):
+                                for blip in iter_blips(paragraph, skip_subtree_names=TEXTBOX_SKIP_NAMES):
                                     rel_id = blip.attrib.get(R_EMBED)
                                     target = resolved_relationship_target(part_path, part_rels, rel_id)
                                     if target:
                                         media_refs.append({"relationship_id": rel_id or "", "target": target, **location})
+                                for textbox_child in textbox_blocks(paragraph):
+                                    textbox_location = {**location, "container": "textbox"}
+                                    process_child(textbox_child, textbox_location)
                 elif tag == qn("w", "sdt"):
                     sdt_content = child.find("w:sdtContent", NS)
                     if sdt_content is not None:

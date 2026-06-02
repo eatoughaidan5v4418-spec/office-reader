@@ -95,12 +95,15 @@ def collect_plain_text(element: ET.Element | None) -> str:
     return "".join(parts).strip()
 
 
-def paragraph_text_with_revisions(paragraph: ET.Element) -> tuple[str, list[dict[str, Any]]]:
+def paragraph_text_with_revisions(paragraph: ET.Element, skip_subtree_names: set[str] | None = None) -> tuple[str, list[dict[str, Any]]]:
     parts: list[str] = []
     revisions: list[dict[str, Any]] = []
+    skip_subtree_names = skip_subtree_names or set()
 
     def walk(node: ET.Element, mode: str | None = None, meta: dict[str, str] | None = None) -> None:
         name = local_name(node.tag)
+        if name in skip_subtree_names:
+            return
         if name == "ins":
             next_meta = {
                 "author": node.attrib.get(W_AUTHOR, ""),
