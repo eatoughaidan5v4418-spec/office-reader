@@ -208,6 +208,9 @@ if ($ext -notin @(".docx", ".pptx")) {
 $outDir = if ($OutputDir) { $OutputDir } else { Join-Path (Split-Path -Parent $sourcePath) ([IO.Path]::GetFileNameWithoutExtension($sourcePath) + ".preview") }
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $pdfPath = Join-Path $outDir ([IO.Path]::GetFileNameWithoutExtension($sourcePath) + ".pdf")
+if (Test-Path -LiteralPath $pdfPath -PathType Leaf) {
+    Emit-Failure @("Preview output already exists and will not be overwritten: $pdfPath")
+}
 
 $messages = @()
 $skipInlineCom = $false

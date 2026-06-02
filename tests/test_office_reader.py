@@ -318,6 +318,46 @@ class OfficeReaderTests(unittest.TestCase):
             manifest = json.loads((out_dir / "board-memo.manifest.json").read_text(encoding="utf-8"))
             self.assertTrue(any(item.get("cache_hit") for item in manifest["visual_findings"]))
 
+    def test_visual_analysis_reuses_existing_preview_pdf_without_overwriting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "board-memo.docx"
+            out_dir = tmp_path / "out"
+            make_docx(source)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+            preview_dir = out_dir / "preview"
+            preview_dir.mkdir()
+            preview_pdf = preview_dir / "board-memo.pdf"
+            preview_pdf.write_bytes(
+                b"%PDF-1.4\n"
+                b"1 0 obj<<>>endobj\n"
+                b"2 0 obj<< /Type /Catalog /Pages 3 0 R >>endobj\n"
+                b"3 0 obj<< /Type /Pages /Count 0 >>endobj\n"
+                b"trailer<< /Root 2 0 R >>\n%%EOF\n"
+            )
+            before = preview_pdf.stat().st_mtime_ns
+
+            self.run_script(
+                "visual_analysis.py",
+                out_dir / "board-memo.manifest.json",
+                "--normalized-file",
+                source,
+                "--out-dir",
+                out_dir,
+                "--mode",
+                "complete",
+                "--no-openai-vision",
+                "--timeout-seconds",
+                "1",
+            )
+
+            manifest = json.loads((out_dir / "board-memo.manifest.json").read_text(encoding="utf-8"))
+            messages = " ".join(manifest["visual_analysis"]["messages"]).lower()
+            self.assertIn("reusing existing preview pdf", messages)
+            self.assertEqual(manifest["artifacts"]["preview_pdf"], str(preview_pdf))
+            self.assertEqual(preview_pdf.stat().st_mtime_ns, before)
+
     def test_fast_mode_does_not_render_pages(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -752,6 +792,85 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(data["status"], "failed")
             self.assertIn("preview health path", " ".join(data["messages"]).lower())
             self.assertEqual(protected_file.read_text(encoding="utf-8"), "do not overwrite")
+
+    def test_render_preview_refuses_to_overwrite_existing_pdf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "board-memo.docx"
+            out_dir = tmp_path / "preview"
+            existing_pdf = out_dir / "board-memo.pdf"
+            make_docx(source)
+            out_dir.mkdir()
+            existing_pdf.write_text("existing preview", encoding="utf-8")
+            script = SCRIPTS_DIR / "render_preview.ps1"
+
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script),
+                    "-InputPath",
+                    str(source),
+                    "-OutputDir",
+                    str(out_dir),
+                    "-TimeoutSeconds",
+                    "1",
+                    "-ContinueAfterComFailure",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["status"], "failed")
+            self.assertIn("already exists", " ".join(data["messages"]).lower())
+            self.assertEqual(existing_pdf.read_text(encoding="utf-8"), "existing preview")
+
+    def test_legacy_conversion_refuses_to_overwrite_existing_normalized_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "legacy.doc"
+            out_dir = tmp_path / "converted"
+            existing_docx = out_dir / "legacy.docx"
+            source.write_bytes(b"not a real legacy document")
+            out_dir.mkdir()
+            existing_docx.write_text("existing normalized document", encoding="utf-8")
+            script = SCRIPTS_DIR / "convert_legacy_office.ps1"
+
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script),
+                    "-InputPath",
+                    str(source),
+                    "-OutputDir",
+                    str(out_dir),
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["status"], "failed")
+            self.assertIn("already exists", " ".join(data["messages"]).lower())
+            self.assertEqual(existing_docx.read_text(encoding="utf-8"), "existing normalized document")
 
 
 if __name__ == "__main__":

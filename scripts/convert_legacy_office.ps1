@@ -79,6 +79,11 @@ function Save-WithLibreOffice {
     return $true
 }
 
+if (-not (Test-Path -LiteralPath $InputPath -PathType Leaf)) {
+    New-Result -Status "failed" -Backend "" -OutputPath "" -Messages @("Input file does not exist: $InputPath") | ConvertTo-Json -Depth 5
+    exit 1
+}
+
 $input = (Resolve-Path -LiteralPath $InputPath).Path
 $ext = [IO.Path]::GetExtension($input).ToLowerInvariant()
 if ($ext -notin @(".doc", ".ppt")) {
@@ -90,6 +95,10 @@ $outDir = if ($OutputDir) { $OutputDir } else { Split-Path -Parent $input }
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $targetExt = if ($ext -eq ".doc") { ".docx" } else { ".pptx" }
 $output = Join-Path $outDir ([IO.Path]::GetFileNameWithoutExtension($input) + $targetExt)
+if (Test-Path -LiteralPath $output -PathType Leaf) {
+    New-Result -Status "failed" -Backend "" -OutputPath "" -Messages @("Converted output already exists and will not be overwritten: $output") | ConvertTo-Json -Depth 5
+    exit 1
+}
 $kind = if ($ext -eq ".doc") { "word" } else { "presentation" }
 
 $discoverArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $ScriptDir "discover_office_backends.ps1"), "-InputExtension", $ext, "-Format", "json")

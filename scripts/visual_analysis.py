@@ -165,6 +165,14 @@ def render_preview(normalized_file: Path, out_dir: Path, timeout_seconds: int, m
         if message:
             messages.append(str(message))
     if proc.returncode != 0 or result.get("status") != "success":
+        existing_pdf = preview_dir / f"{normalized_file.stem}.pdf"
+        if existing_pdf.exists() and any("already exists" in str(item).lower() for item in result.get("messages", [])):
+            messages.append(f"Reusing existing preview PDF without overwriting: {existing_pdf}")
+            reuse_result = dict(result)
+            reuse_result["status"] = "success"
+            reuse_result["backend"] = "existing-preview"
+            reuse_result["artifacts"] = [str(existing_pdf)]
+            return existing_pdf, reuse_result
         return None, result
     artifacts = [Path(item) for item in result.get("artifacts", []) if item]
     pdf = next((item for item in artifacts if item.suffix.lower() == ".pdf" and item.exists()), None)

@@ -27,6 +27,8 @@ The converter attempts Microsoft Office COM first. If Office COM is unavailable 
 
 LibreOffice is used through headless `soffice --convert-to` only after Office COM and WPS fail or are missing.
 
+Legacy conversion refuses to overwrite an existing normalized `.docx` or `.pptx` output. Use a fresh output directory when rerunning conversion for the same source.
+
 ## Failure Contract
 
 When all backends fail, the script exits non-zero and prints JSON with `status: "failed"` plus messages for every attempted backend. Surface those messages to the user.
@@ -34,6 +36,8 @@ When all backends fail, the script exits non-zero and prints JSON with `status: 
 ## Preview Rendering
 
 `scripts/render_preview.ps1` exports normalized `.docx` or `.pptx` files to PDF for visual inspection. It uses Microsoft Office COM when available and falls back to LibreOffice. It returns structured JSON and enforces a timeout to avoid stuck Office automation workers.
+
+Preview rendering refuses to overwrite an existing `<basename>.pdf` in the preview output directory. Use a fresh preview directory when rerunning a render.
 
 Preview rendering keeps a small backend health file at `.office-reader-cache/preview-backend-health.json` by default. When Office COM preview times out or returns invalid JSON, the script marks `office-com` unhealthy for that normalized extension. Later preview runs skip COM and try fallback preview backends first, preserving the skip reason in JSON messages. A successful COM preview records the backend as healthy again.
 
