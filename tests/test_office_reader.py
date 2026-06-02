@@ -710,6 +710,49 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(entry["reason"], "timeout")
             self.assertEqual(entry["timeout_seconds"], 1)
 
+    def test_render_preview_rejects_health_path_that_would_overwrite_regular_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "board-memo.docx"
+            out_dir = tmp_path / "preview"
+            protected_file = tmp_path / "ordinary-file.txt"
+            make_docx(source)
+            protected_file.write_text("do not overwrite", encoding="utf-8")
+            script = SCRIPTS_DIR / "render_preview.ps1"
+            env = os.environ.copy()
+            env["OFFICE_READER_PREVIEW_HEALTH_PATH"] = str(protected_file)
+
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script),
+                    "-InputPath",
+                    str(source),
+                    "-OutputDir",
+                    str(out_dir),
+                    "-TimeoutSeconds",
+                    "1",
+                    "-ContinueAfterComFailure",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+                env=env,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["status"], "failed")
+            self.assertIn("preview health path", " ".join(data["messages"]).lower())
+            self.assertEqual(protected_file.read_text(encoding="utf-8"), "do not overwrite")
+
 
 if __name__ == "__main__":
     unittest.main()

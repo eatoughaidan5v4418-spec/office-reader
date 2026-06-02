@@ -18,6 +18,24 @@ function Get-PreviewHealthPath {
     return (Join-Path $SkillDir ".office-reader-cache\preview-backend-health.json")
 }
 
+function Assert-PreviewHealthPathSafe {
+    $path = Get-PreviewHealthPath
+    if ([IO.Path]::GetExtension($path).ToLowerInvariant() -ne ".json") {
+        throw "Preview health path must end with .json: $path"
+    }
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        try {
+            $existing = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+            if (-not $existing.PSObject.Properties["preview"]) {
+                throw "missing preview object"
+            }
+        } catch {
+            throw "Preview health path points to an existing non-health JSON file or non-JSON file: $path"
+        }
+    }
+    return $path
+}
+
 function New-PreviewResult {
     param(
         [string]$Status,
@@ -40,7 +58,7 @@ function Emit-Failure {
 }
 
 function Read-PreviewHealth {
-    $path = Get-PreviewHealthPath
+    $path = Assert-PreviewHealthPathSafe
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         return [pscustomobject]@{ preview = [pscustomobject]@{} }
     }
@@ -70,7 +88,7 @@ function Write-OfficeComPreviewHealth {
         [string]$Reason,
         [int]$Timeout
     )
-    $path = Get-PreviewHealthPath
+    $path = Assert-PreviewHealthPathSafe
     $dir = Split-Path -Parent $path
     if ($dir) {
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
@@ -193,6 +211,11 @@ $pdfPath = Join-Path $outDir ([IO.Path]::GetFileNameWithoutExtension($sourcePath
 
 $messages = @()
 $skipInlineCom = $false
+try {
+    Assert-PreviewHealthPathSafe | Out-Null
+} catch {
+    Emit-Failure @("Invalid preview health path: $($_.Exception.Message)")
+}
 
 if (-not $ComWorker) {
     if (Test-OfficeComPreviewUnhealthy -Extension $ext) {

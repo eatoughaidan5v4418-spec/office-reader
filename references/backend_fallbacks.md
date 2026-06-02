@@ -37,7 +37,7 @@ When all backends fail, the script exits non-zero and prints JSON with `status: 
 
 Preview rendering keeps a small backend health file at `.office-reader-cache/preview-backend-health.json` by default. When Office COM preview times out or returns invalid JSON, the script marks `office-com` unhealthy for that normalized extension. Later preview runs skip COM and try fallback preview backends first, preserving the skip reason in JSON messages. A successful COM preview records the backend as healthy again.
 
-Set `OFFICE_READER_PREVIEW_HEALTH_PATH` to isolate this file for tests or one-off diagnostics. The health memory applies only to preview rendering and must not change the legacy `.doc`/`.ppt` conversion order.
+Set `OFFICE_READER_PREVIEW_HEALTH_PATH` to isolate this file for tests or one-off diagnostics. The path must end in `.json`; if it already exists, it must be a preview health JSON object. This prevents accidentally overwriting an arbitrary user file. The health memory applies only to preview rendering and must not change the legacy `.doc`/`.ppt` conversion order.
 
 The visual deep-read pipeline uses preview rendering in `balanced` and `complete` modes. `balanced` skips rendering when only lightweight OOXML drawing references exist and no packaged media is present, while `complete` tries to render every normalized document.
 
