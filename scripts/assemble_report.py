@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
+
+from common_ooxml import atomic_write_text
 
 
 def first_sentence(text: str, limit: int = 240) -> str:
@@ -28,8 +31,10 @@ def build_report(manifest: dict[str, Any]) -> str:
     comments = manifest.get("comments", [])
     revisions = manifest.get("revisions", [])
     notes = manifest.get("notes", [])
+    warnings = manifest.get("warnings", [])
     visual = manifest.get("visual_findings", [])
     visual_analysis = manifest.get("visual_analysis", {})
+    completeness = manifest.get("completeness_score", {})
     conversion = manifest.get("conversion", {})
 
     lines: list[str] = [f"# Structured Reading Report: {name}", ""]
@@ -42,12 +47,37 @@ def build_report(manifest: dict[str, Any]) -> str:
             bullet("Comments", len(comments)),
             bullet("Revisions", len(revisions)),
             bullet("Speaker notes", len(notes)),
+            bullet("Extraction warnings", len(warnings)),
             bullet("Conversion status", conversion.get("status", "unknown")),
             bullet("Reading mode", manifest.get("reading_mode", "balanced")),
             bullet("Visual analysis", visual_analysis.get("status", "unknown")),
+            bullet(
+                "Reading completeness",
+                f"{completeness.get('score')}/100 ({completeness.get('grade')})" if completeness else "not scored",
+            ),
             "",
         ]
     )
+
+    lines.extend(["## Reading Completeness", ""])
+    if completeness:
+        lines.append(bullet("Overall score", f"{completeness.get('score')}/100 ({completeness.get('grade')})"))
+        for name, component in completeness.get("components", {}).items():
+            lines.append(
+                bullet(
+                    name.replace("_", " ").title(),
+                    f"{component.get('score', 0)}/100, weight {component.get('weight', 0)}%",
+                )
+            )
+        gaps = completeness.get("remaining_gaps", [])
+        if gaps:
+            lines.append("- Remaining gaps:")
+            lines.extend(f"  - {gap}" for gap in gaps)
+        else:
+            lines.append("- Remaining gaps: none recorded.")
+    else:
+        lines.append("- Completeness score was not recorded.")
+    lines.append("")
 
     lines.extend(["## Outline", ""])
     if structure:
@@ -74,7 +104,12 @@ def build_report(manifest: dict[str, Any]) -> str:
     lines.extend(["## Comments And Revisions", ""])
     if comments:
         for comment in comments[:80]:
-            location = f"slide {comment.get('slide_index')}" if comment.get("slide_index") else f"id {comment.get('id', '')}".strip()
+            if comment.get("slide_index") is not None:
+                location = f"slide {comment.get('slide_index')}"
+            elif comment.get("id") not in {None, ""}:
+                location = f"id {comment.get('id')}"
+            else:
+                location = "unattributed"
             lines.append(f"- Comment {location}: {first_sentence(comment.get('text', ''))}")
     else:
         lines.append("- No comments extracted.")
@@ -152,6 +187,8 @@ def build_report(manifest: dict[str, Any]) -> str:
         risks.append("Legacy format conversion did not complete successfully.")
     if not structure:
         risks.append("No readable body/slide structure was extracted.")
+    for warning in warnings[:10]:
+        risks.append(f"Extraction warning: {warning}")
     if not risks:
         risks.append("No blocking extraction risks detected by the manifest.")
     lines.extend(f"- {risk}" for risk in risks)
@@ -173,10 +210,16 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
-    manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    report = build_report(manifest)
-    out = args.out or args.manifest.with_name(args.manifest.name.replace(".manifest.json", ".report.md"))
-    out.write_text(report, encoding="utf-8")
+    try:
+        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            raise ValueError("manifest is not a JSON object")
+        report = build_report(manifest)
+        out = args.out or args.manifest.with_name(args.manifest.name.replace(".manifest.json", ".report.md"))
+        atomic_write_text(out, report)
+    except Exception as exc:
+        print(f"Failed to assemble report: {exc}", file=sys.stderr)
+        return 1
     print(str(out))
     return 0
 

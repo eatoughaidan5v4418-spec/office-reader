@@ -15,6 +15,7 @@ from common_ooxml import (
     R_EMBED,
     W_ID,
     W_VAL,
+    atomic_write_text,
     collect_plain_text,
     core_properties,
     default_manifest,
@@ -23,8 +24,11 @@ from common_ooxml import (
     media_members,
     paragraph_text_with_revisions,
     qn,
+    read_optional_xml,
     read_relationships,
     read_xml,
+    relationship_part_path,
+    select_artifact_output_dir,
     table_to_rows,
     write_json,
 )
@@ -41,8 +45,8 @@ def heading_level(paragraph) -> int | None:
     return None
 
 
-def extract_comments(package: zipfile.ZipFile) -> list[dict[str, Any]]:
-    root = read_xml(package, "word/comments.xml")
+def extract_comments(package: zipfile.ZipFile, warnings: list[str]) -> list[dict[str, Any]]:
+    root = read_optional_xml(package, "word/comments.xml", warnings)
     if root is None:
         return []
     comments = []
@@ -74,10 +78,10 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
     markdown: list[str] = []
 
     with zipfile.ZipFile(source) as package:
-        manifest["metadata"] = core_properties(package)
-        manifest["comments"] = extract_comments(package)
+        manifest["metadata"] = core_properties(package, manifest["warnings"])
+        manifest["comments"] = extract_comments(package, manifest["warnings"])
         comments_by_id = {item["id"]: item for item in manifest["comments"]}
-        rels = read_relationships(package, "word/_rels/document.xml.rels")
+        rels = read_relationships(package, "word/_rels/document.xml.rels", manifest["warnings"])
         root = read_xml(package, "word/document.xml")
         if root is None:
             raise ValueError("word/document.xml is missing from DOCX package")
@@ -122,7 +126,7 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                 for blip in child.iter(qn("a", "blip")):
                     rel_id = blip.attrib.get(R_EMBED)
                     rel = rels.get(rel_id or "")
-                    target = rel.get("target", "") if rel else ""
+                    target = relationship_part_path("word/document.xml", rel, manifest["warnings"]) if rel else ""
                     if target:
                         media_refs.append({"relationship_id": rel_id or "", "target": target})
 
@@ -175,7 +179,7 @@ def main() -> int:
         print(f"read_docx.py expects a .docx file, got {source.suffix}", file=sys.stderr)
         return 2
     out_dir = (args.out_dir or source.parent).resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = select_artifact_output_dir(source, out_dir, "docx")
 
     try:
         manifest, full_md = extract_docx(source, out_dir)
@@ -185,7 +189,7 @@ def main() -> int:
 
     full_path = out_dir / f"{source.stem}.full.md"
     manifest_path = out_dir / f"{source.stem}.manifest.json"
-    full_path.write_text(full_md, encoding="utf-8")
+    atomic_write_text(full_path, full_md)
     write_json(manifest_path, manifest)
     print(str(manifest_path))
     return 0

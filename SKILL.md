@@ -13,13 +13,14 @@ Use this skill to turn Word and PowerPoint files into a full Markdown transcript
 
 1. Resolve the input file path and create an output directory near the source unless the user requested another location.
 2. Prefer the unified entrypoint: `python scripts/read_office.py <file> --out-dir <out-dir> --mode balanced`.
-3. If doing the workflow manually and the file is `.doc` or `.ppt`, run `scripts/convert_legacy_office.ps1` first. It tries Microsoft Office COM, then WPS if present, then LibreOffice.
+3. If doing the workflow manually and the file is `.doc` or `.ppt`, run `scripts/convert_legacy_office.ps1` first. It tries Microsoft Office COM, then WPS if present, then LibreOffice. Each backend runs in an isolated worker with a 45-second default timeout before fallback.
 4. Run the reader that matches the normalized file:
    - `.docx`: `python scripts/read_docx.py <file.docx> --out-dir <out-dir>`
    - `.pptx`: `python scripts/read_pptx.py <file.pptx> --out-dir <out-dir>`
 5. Enrich visuals with `python scripts/visual_analysis.py <manifest> --normalized-file <file.docx|pptx> --out-dir <out-dir> --mode balanced`.
 6. Build the report with `python scripts/assemble_report.py <basename>.manifest.json`.
 7. Read the manifest and report before answering the user. Call out visual-review gaps whenever preview rendering, OCR, or OpenAI vision was skipped or failed.
+8. Use `completeness_score` as a coverage signal: report the score and remaining gaps, but do not treat a high score as proof that every extracted fact is correct.
 
 ## Reading Modes
 
@@ -29,6 +30,8 @@ Use this skill to turn Word and PowerPoint files into a full Markdown transcript
 
 Use `--no-openai-vision` when cloud visual analysis is not allowed. Without `OPENAI_API_KEY`, local OCR still runs when available and the report clearly lists remaining visual gaps.
 
+Visual cache entries are isolated by reading mode and analysis profile. A local-only run does not suppress a later OpenAI Vision run, and cloud-derived summaries are not reused as local-only results.
+
 ## Dependency Bootstrap
 
 Run `scripts/bootstrap_deps.ps1 -DryRun -IncludeSystemTools` to inspect missing dependencies without installing anything.
@@ -37,15 +40,23 @@ Run `scripts/bootstrap_deps.ps1 -IncludeSystemTools` to create the skill-local `
 
 Run `scripts/bootstrap_deps.ps1 -IncludeSystemTools -InstallSystemTools` only when the user wants missing fallback tools installed. It prefers `winget`/`choco` packages for LibreOffice, Poppler, Tesseract, and optional WPS. Python packages stay inside `C:\Users\Huang\.codex\skills\office-reader\.venv`.
 
+When using `read_office.py`, pass `--install-missing-deps --install-system-tools` together to request system fallback installation. `--install-system-tools` alone is rejected.
+
+After attempting system-tool installation, bootstrap reruns discovery. Inspect each returned `system_tools` entry for final `available`, `source`, `install_attempted`, `install_exit_code`, and `install_result` values. Do not treat a package-manager invocation as proof that the tool became available.
+
 Portable Poppler/Tesseract builds can be used without system install. Put the folders under `scripts/../tools`, the parent skills directory, or the current workspace, or set `OFFICE_READER_TOOL_PATHS` to their `bin` directories.
+
+Set `SOFFICE_PATH` or `LIBREOFFICE_PATH` to a LibreOffice executable or installation directory when LibreOffice is installed outside the usual locations. Backend discovery, dependency dry-run, and conversion honor the same overrides.
 
 ## Output Contract
 
 Every successful read produces:
 
 - `<basename>.full.md`: full Markdown transcript with headings, slide boundaries, tables, comments, revisions, and notes where extractable.
-- `<basename>.manifest.json`: structured extraction data plus `reading_mode` and `visual_analysis`. See `references/output_schema.md`.
+- `<basename>.manifest.json`: structured extraction data plus `reading_mode`, `visual_analysis`, and non-fatal OOXML `warnings`. See `references/output_schema.md`.
 - `<basename>.report.md`: structured reading report with summary, outline, tables, comments/revisions, notes, visual findings, risks, and artifacts.
+
+If unknown same-name artifacts already exist in the selected output directory, preserve them and use an `office-reader-run-<guid>` subdirectory. Same-source office-reader reruns may reuse their prior artifact paths.
 
 If legacy conversion fails, return the conversion JSON and explain which backends were unavailable. Do not pretend a `.doc` or `.ppt` was read when no normalized `.docx` or `.pptx` exists.
 
@@ -67,21 +78,37 @@ For `.pptx`, extract presentation metadata, slide order, slide text, tables, spe
 
 XML extraction does not fully read text inside images, screenshots, rasterized charts, SmartArt, or complex embedded objects. In `balanced` or `complete` mode, the visual pipeline renders pages/slides when possible, applies local OCR, optionally asks OpenAI vision for diagram/chart/screenshot interpretation, caches results, and writes findings back into `visual_findings`.
 
+If optional comments, notes, metadata, or relationship XML is malformed, preserve readable body content and inspect manifest `warnings` plus the report risks section before treating the read as complete.
+
 ## Quick Commands
 
 ```powershell
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode balanced
 python scripts\read_office.py C:\path\file.pptx --out-dir C:\path\out --mode complete
+python scripts\read_office.py C:\path\file.doc --out-dir C:\path\out --mode fast --legacy-timeout-seconds 45
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode balanced --no-openai-vision
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\bootstrap_deps.ps1 -DryRun -IncludeSystemTools
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\discover_office_backends.ps1 -InputExtension .doc -Format json
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\convert_legacy_office.ps1 -InputPath C:\path\file.doc -OutputDir C:\path\out
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\convert_legacy_office.ps1 -InputPath C:\path\file.doc -OutputDir C:\path\out -TimeoutSeconds 45
 python scripts\read_docx.py C:\path\file.docx --out-dir C:\path\out
 python scripts\read_pptx.py C:\path\file.pptx --out-dir C:\path\out
 python scripts\visual_analysis.py C:\path\out\file.manifest.json --normalized-file C:\path\file.docx --out-dir C:\path\out --mode balanced
 python scripts\assemble_report.py C:\path\out\file.manifest.json
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\render_preview.ps1 -InputPath C:\path\file.pptx -OutputDir C:\path\preview
+python scripts\smoke_office_reader.py --doc C:\path\file.doc --docx C:\path\file.docx --pptx C:\path\file.pptx --derive-ppt-from-pptx --visual-timeout-seconds 180
 ```
+
+## Local Smoke Validation
+
+Use `scripts/smoke_office_reader.py` for repeatable real-document validation. It runs `.doc`, `.docx`, `.ppt`, and `.pptx` in `fast` mode, then reruns modern `.docx` and `.pptx` inputs in `complete --no-openai-vision` mode. Pass `--derive-ppt-from-pptx` when a local `.ppt` fixture is unavailable.
+
+Keep real source documents, derived `.ppt` files, caches, and smoke output local. Derived PPT fixtures use unique `<stem>.derived-<guid>.ppt` names to preserve existing files. Do not commit them to the skill repository.
+
+For long Word documents, raise `--visual-timeout-seconds` during smoke validation so Office COM preview has time to fail cleanly and LibreOffice fallback can still render pages.
+
+Modern DOCX preview records a private machine-local health entry after a Word COM timeout. For seven days, later previews try LibreOffice first and fall back to the normal COM-first route if needed. This does not change legacy `.doc`/`.ppt` conversion order. Set `OFFICE_READER_PREVIEW_HEALTH_PATH` when an isolated cache is required.
+
+PowerShell JSON output is ASCII-safe so Unicode and space-containing paths remain parseable when stdout is redirected across Windows console code pages.
 
 ## Common Mistakes
 

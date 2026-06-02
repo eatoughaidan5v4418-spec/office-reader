@@ -6,6 +6,24 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$utf8 = [System.Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = $utf8
+$OutputEncoding = $utf8
+
+function ConvertTo-SafeJson {
+    param(
+        [Parameter(ValueFromPipeline = $true)]
+        $InputObject,
+        [int]$Depth = 5
+    )
+    process {
+        $json = $InputObject | ConvertTo-Json -Depth $Depth
+        [regex]::Replace($json, "[^\x00-\x7F]", {
+            param($match)
+            "\u{0:x4}" -f [int][char]$match.Value
+        })
+    }
+}
 
 function Test-ExistingFile {
     param([string]$Path)
@@ -73,6 +91,21 @@ function Find-CommonExe {
     return $null
 }
 
+function Resolve-LibreOfficeOverride {
+    foreach ($value in @($env:SOFFICE_PATH, $env:LIBREOFFICE_PATH)) {
+        if ([string]::IsNullOrWhiteSpace($value)) { continue }
+        $path = Test-ExistingFile $value
+        if ($path) { return $path }
+        if (Test-Path -LiteralPath $value -PathType Container) {
+            foreach ($candidate in @((Join-Path $value "soffice.exe"), (Join-Path $value "program\soffice.exe"))) {
+                $path = Test-ExistingFile $candidate
+                if ($path) { return $path }
+            }
+        }
+    }
+    return $null
+}
+
 function Test-ProgId {
     param([string[]]$ProgIds)
     $available = @()
@@ -130,7 +163,8 @@ function Resolve-OfficeComBackend {
 }
 
 function Resolve-LibreOfficeBackend {
-    $path = Get-CommandPath @("soffice", "libreoffice", "soffice.exe", "libreoffice.exe")
+    $path = Resolve-LibreOfficeOverride
+    if (-not $path) { $path = Get-CommandPath @("soffice", "libreoffice", "soffice.exe", "libreoffice.exe") }
     if (-not $path) { $path = Find-CommonExe @("soffice.exe", "libreoffice.exe") }
     [pscustomobject]@{
         name = "libreoffice"
@@ -162,7 +196,7 @@ $result = [pscustomobject]@{
 }
 
 if ($Format.ToLowerInvariant() -eq "json") {
-    $result | ConvertTo-Json -Depth 8
+    $result | ConvertTo-SafeJson -Depth 8
 } else {
     $priority | Format-Table name, available, reason -AutoSize
 }

@@ -7,9 +7,27 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$utf8 = [System.Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = $utf8
+$OutputEncoding = $utf8
 $SkillDir = Split-Path -Parent $PSScriptRoot
 $VenvDir = Join-Path $SkillDir ".venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
+
+function ConvertTo-SafeJson {
+    param(
+        [Parameter(ValueFromPipeline = $true)]
+        $InputObject,
+        [int]$Depth = 5
+    )
+    process {
+        $json = $InputObject | ConvertTo-Json -Depth $Depth
+        [regex]::Replace($json, "[^\x00-\x7F]", {
+            param($match)
+            "\u{0:x4}" -f [int][char]$match.Value
+        })
+    }
+}
 
 function Get-LocalToolDirs {
     $dirs = @()
@@ -40,6 +58,21 @@ function Get-LocalToolDirs {
 
 function Get-CommandSource {
     param([string[]]$Names)
+    if ($Names -contains "soffice") {
+        foreach ($value in @($env:SOFFICE_PATH, $env:LIBREOFFICE_PATH)) {
+            if ([string]::IsNullOrWhiteSpace($value)) { continue }
+            if (Test-Path -LiteralPath $value -PathType Leaf) {
+                return (Resolve-Path -LiteralPath $value).Path
+            }
+            if (Test-Path -LiteralPath $value -PathType Container) {
+                foreach ($candidate in @((Join-Path $value "soffice.exe"), (Join-Path $value "program\soffice.exe"))) {
+                    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                        return (Resolve-Path -LiteralPath $candidate).Path
+                    }
+                }
+            }
+        }
+    }
     foreach ($dir in Get-LocalToolDirs) {
         foreach ($name in $Names) {
             $candidateNames = @($name)
@@ -57,6 +90,15 @@ function Get-CommandSource {
     foreach ($name in $Names) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($cmd) { return $cmd.Source }
+    }
+    if ($Names -contains "soffice") {
+        foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA)) {
+            if ([string]::IsNullOrWhiteSpace($root)) { continue }
+            $candidate = Join-Path $root "LibreOffice\program\soffice.exe"
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                return (Resolve-Path -LiteralPath $candidate).Path
+            }
+        }
     }
     return $null
 }
@@ -122,32 +164,38 @@ foreach ($pkg in $pythonPackages) {
     }
 }
 
-$toolPlan = @()
-$winget = Get-Command winget -ErrorAction SilentlyContinue
-$choco = Get-Command choco -ErrorAction SilentlyContinue
-foreach ($tool in $systemTools) {
-    $source = Get-CommandSource -Names $tool.commands
-    $manager = if ($tool.winget_id -and $winget) { "winget" } elseif ($tool.choco_id -and $choco) { "choco" } else { "" }
-    $installCommand = ""
-    if (-not $source) {
-        if ($manager -eq "winget") {
-            $installCommand = "winget install --id $($tool.winget_id) --accept-source-agreements --accept-package-agreements"
-        } elseif ($manager -eq "choco") {
-            $installCommand = "choco install $($tool.choco_id) -y"
+function Get-SystemToolPlan {
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    $choco = Get-Command choco -ErrorAction SilentlyContinue
+    foreach ($tool in $systemTools) {
+        $source = Get-CommandSource -Names $tool.commands
+        $manager = if ($tool.winget_id -and $winget) { "winget" } elseif ($tool.choco_id -and $choco) { "choco" } else { "" }
+        $installCommand = ""
+        if (-not $source) {
+            if ($manager -eq "winget") {
+                $installCommand = "winget install --id $($tool.winget_id) --accept-source-agreements --accept-package-agreements"
+            } elseif ($manager -eq "choco") {
+                $installCommand = "choco install $($tool.choco_id) -y"
+            }
+        }
+        [pscustomobject]@{
+            name = $tool.name
+            available = [bool]$source
+            source = $source
+            package_manager = $manager
+            winget_id = $tool.winget_id
+            choco_id = $tool.choco_id
+            install_command = $installCommand
+            optional = [bool]$tool.optional
+            action = if ($source) { "none" } elseif ($installCommand) { "install" } else { "manual_install_required" }
+            install_attempted = $false
+            install_exit_code = $null
+            install_result = "not_attempted"
         }
     }
-    $toolPlan += [pscustomobject]@{
-        name = $tool.name
-        available = [bool]$source
-        source = $source
-        package_manager = $manager
-        winget_id = $tool.winget_id
-        choco_id = $tool.choco_id
-        install_command = $installCommand
-        optional = [bool]$tool.optional
-        action = if ($source) { "none" } elseif ($installCommand) { "install" } else { "manual_install_required" }
-    }
 }
+
+$toolPlan = @(Get-SystemToolPlan)
 
 if ($DryRun) {
     [pscustomobject]@{
@@ -157,7 +205,7 @@ if ($DryRun) {
         python_packages = $packagePlan
         system_tools = $toolPlan
         messages = @("Dry run only; no packages or system tools were installed.")
-    } | ConvertTo-Json -Depth 8
+    } | ConvertTo-SafeJson -Depth 8
     exit 0
 }
 
@@ -191,22 +239,52 @@ if ($toInstall.Count -gt 0) {
 }
 
 $systemMessages = @()
+$systemAttempts = @{}
 if ($InstallSystemTools) {
-foreach ($tool in $toolPlan) {
+    foreach ($tool in $toolPlan) {
         if ($tool.action -ne "install") { continue }
         if ($tool.optional) {
             $systemMessages += "Skipped optional fallback tool $($tool.name)."
+            $systemAttempts[$tool.name] = [pscustomobject]@{
+                attempted = $false
+                exit_code = $null
+                result = "skipped_optional"
+            }
             continue
         }
         if ($tool.package_manager -eq "winget") {
-            winget install --id $tool.winget_id --accept-source-agreements --accept-package-agreements
+            & winget install --id $tool.winget_id --accept-source-agreements --accept-package-agreements
         } elseif ($tool.package_manager -eq "choco") {
-            choco install $tool.choco_id -y
+            & choco install $tool.choco_id -y
         }
-        $systemMessages += "Attempted install for $($tool.name) via $($tool.package_manager)."
+        $systemAttempts[$tool.name] = [pscustomobject]@{
+            attempted = $true
+            exit_code = $LASTEXITCODE
+            result = if ($LASTEXITCODE -eq 0) { "pending_detection" } else { "failed" }
+        }
     }
 } elseif ($toolPlan.Count -gt 0) {
     $systemMessages += "System tools were inspected but not installed. Microsoft Office COM is preferred when available; pass -InstallSystemTools only for fallback tools such as LibreOffice/Poppler/Tesseract or optional WPS."
+}
+
+$toolPlan = @(Get-SystemToolPlan)
+foreach ($tool in $toolPlan) {
+    if (-not $systemAttempts.ContainsKey($tool.name)) { continue }
+    $attempt = $systemAttempts[$tool.name]
+    $tool.install_attempted = $attempt.attempted
+    $tool.install_exit_code = $attempt.exit_code
+    if ($attempt.result -eq "skipped_optional") {
+        $tool.install_result = "skipped_optional"
+    } elseif ($attempt.exit_code -ne 0) {
+        $tool.install_result = "failed"
+        $systemMessages += "Install failed for $($tool.name) via $($tool.package_manager) with exit code $($attempt.exit_code)."
+    } elseif ($tool.available) {
+        $tool.install_result = "installed"
+        $systemMessages += "Installed $($tool.name) via $($tool.package_manager)."
+    } else {
+        $tool.install_result = "not_detected_after_install"
+        $systemMessages += "Install command completed for $($tool.name) via $($tool.package_manager), but the tool was not detected afterward."
+    }
 }
 
 $finalPackagePlan = @()
@@ -221,12 +299,20 @@ foreach ($pkg in $pythonPackages) {
     }
 }
 
-[pscustomobject]@{
-    status = "completed"
+$missingRequiredPackages = @($finalPackagePlan | Where-Object { $_.required -and -not $_.installed })
+$bootstrapStatus = if ($missingRequiredPackages.Count -gt 0) { "failed" } else { "completed" }
+if ($missingRequiredPackages.Count -gt 0) {
+    $systemMessages += "Required Python packages are still missing after bootstrap: $($missingRequiredPackages.name -join ', ')."
+}
+
+$result = [pscustomobject]@{
+    status = $bootstrapStatus
     skill_dir = $SkillDir
     venv_dir = $VenvDir
     python = $VenvPython
     python_packages = $finalPackagePlan
     system_tools = $toolPlan
     messages = $systemMessages
-} | ConvertTo-Json -Depth 8
+}
+$result | ConvertTo-SafeJson -Depth 8
+if ($missingRequiredPackages.Count -gt 0) { exit 1 }

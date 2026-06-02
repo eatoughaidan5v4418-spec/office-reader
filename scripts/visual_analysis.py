@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -13,6 +14,7 @@ import site
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,7 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
 VISUAL_MARKER = "<!-- office-reader-visual-deep-read -->"
+CACHE_VERSION = "v2"
 VISUAL_FIELDS = {
     "page_index": None,
     "slide_index": None,
@@ -32,6 +35,13 @@ VISUAL_FIELDS = {
     "duration_ms": 0,
     "cache_hit": False,
 }
+
+
+def positive_int(value: str) -> int:
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return number
 
 
 def add_skill_venv_to_path() -> None:
@@ -95,8 +105,19 @@ def read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(text, encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 def write_json(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
 
 
 def sha256_file(path: Path) -> str:
@@ -116,6 +137,12 @@ def ensure_visual_fields(finding: dict[str, Any]) -> dict[str, Any]:
     for key, value in VISUAL_FIELDS.items():
         finding.setdefault(key, value)
     return finding
+
+
+def is_rendered_page_finding(finding: dict[str, Any]) -> bool:
+    return finding.get("origin") == "rendered-page" or (
+        bool(finding.get("image_path")) and finding.get("reason") == "rendered page selected for visual deep read"
+    )
 
 
 def run_command(command: list[str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
@@ -161,25 +188,49 @@ def render_preview(normalized_file: Path, out_dir: Path, timeout_seconds: int, m
         detail = (proc.stderr or proc.stdout or "").strip()
         messages.append(f"Preview rendering did not return JSON: {detail}")
         return None, {"status": "failed", "messages": [detail]}
-    for message in result.get("messages", []):
+    if not isinstance(result, dict):
+        detail = "Preview rendering did not return a JSON object."
+        messages.append(detail)
+        return None, {"status": "failed", "messages": [detail]}
+    backend_messages = result.get("messages", [])
+    artifacts = result.get("artifacts", [])
+    if not isinstance(backend_messages, list) or not isinstance(artifacts, list):
+        detail = "Preview rendering JSON did not contain list fields for messages and artifacts."
+        messages.append(detail)
+        return None, {"status": "failed", "messages": [detail]}
+    for message in backend_messages:
         if message:
             messages.append(str(message))
     if proc.returncode != 0 or result.get("status") != "success":
         return None, result
-    artifacts = [Path(item) for item in result.get("artifacts", []) if item]
-    pdf = next((item for item in artifacts if item.suffix.lower() == ".pdf" and item.exists()), None)
+    if any(item and not isinstance(item, str) for item in artifacts):
+        detail = "Preview rendering JSON artifacts must contain string artifact paths."
+        messages.append(detail)
+        return None, {"status": "failed", "messages": [detail]}
+    artifact_paths = [Path(item) for item in artifacts if item]
+    pdf = next((item for item in artifact_paths if item.suffix.lower() == ".pdf" and item.exists()), None)
+    if pdf is None:
+        message = "Preview rendering reported success but did not return an existing PDF artifact."
+        messages.append(message)
+        return None, {**result, "status": "failed", "messages": [*result.get("messages", []), message]}
+    try:
+        pdf.resolve().relative_to(preview_dir.resolve())
+    except (OSError, ValueError):
+        message = f"Rejected preview PDF outside preview directory: {pdf}"
+        messages.append(message)
+        return None, {**result, "status": "failed", "messages": [*result.get("messages", []), message]}
     return pdf, result
 
 
 def render_pdf_pages(pdf_path: Path, out_dir: Path, messages: list[str], max_pages: int | None = None) -> list[Path]:
-    image_dir = out_dir / "page_images"
-    image_dir.mkdir(parents=True, exist_ok=True)
+    image_dir = out_dir / "page_images" / f"render-{uuid.uuid4().hex}"
     try:
         import fitz  # type: ignore
     except Exception as exc:
         messages.append(f"PyMuPDF is unavailable, so preview PDF pages were not rasterized: {exc}")
         return []
 
+    image_dir.mkdir(parents=True, exist_ok=True)
     pages: list[Path] = []
     try:
         with fitz.open(str(pdf_path)) as document:
@@ -193,6 +244,11 @@ def render_pdf_pages(pdf_path: Path, out_dir: Path, messages: list[str], max_pag
                 pages.append(image_path)
     except Exception as exc:
         messages.append(f"Preview PDF page rendering failed: {exc}")
+    if not pages:
+        try:
+            image_dir.rmdir()
+        except OSError:
+            pass
     return pages
 
 
@@ -241,13 +297,18 @@ def rapidocr_text(image_path: Path) -> tuple[str, str]:
 
 
 def local_ocr(image_path: Path, messages: list[str]) -> tuple[str, str]:
+    rapidocr_available = importlib.util.find_spec("rapidocr") is not None
+    tesseract_available = bool(shutil.which("tesseract"))
     text, backend = rapidocr_text(image_path)
     if text:
         return text, backend
     text, backend = tesseract_ocr(image_path)
     if text:
         return text, backend
-    messages.append("Local OCR backend is unavailable or returned no text; run bootstrap_deps.ps1 to install RapidOCR/Tesseract.")
+    if rapidocr_available or tesseract_available:
+        messages.append(f"Local OCR backends returned no text for {image_path.name}; the page may be blank or image-only.")
+    else:
+        messages.append("Local OCR backend is unavailable; run bootstrap_deps.ps1 to install RapidOCR/Tesseract.")
     return "", ""
 
 
@@ -310,8 +371,9 @@ def openai_visual_summary(image_path: Path, ocr_text: str, messages: list[str], 
         return "", ""
 
 
-def cache_path(cache_dir: Path, source_hash: str, mode: str, item_hash: str) -> Path:
-    return cache_dir / f"{source_hash[:16]}-{mode}-{item_hash[:24]}.json"
+def cache_path(cache_dir: Path, source_hash: str, mode: str, analysis_profile: str, item_hash: str) -> Path:
+    profile_hash = stable_hash({"version": CACHE_VERSION, "profile": analysis_profile})[:12]
+    return cache_dir / f"{source_hash[:16]}-{mode}-{profile_hash}-{item_hash[:24]}.json"
 
 
 def analyze_item(
@@ -324,15 +386,26 @@ def analyze_item(
 ) -> dict[str, Any]:
     image_path = Path(item["image_path"]) if item.get("image_path") else None
     item_hash = sha256_file(image_path) if image_path and image_path.exists() else stable_hash(item)
-    path = cache_path(cache_dir, source_hash, mode, item_hash)
+    analysis_profile = f"openai:{os.environ.get('OFFICE_READER_VISION_MODEL', 'gpt-4o')}" if enable_openai else "local-only"
+    path = cache_path(cache_dir, source_hash, mode, analysis_profile, item_hash)
     if path.exists():
-        cached = read_json(path)
-        cached["cache_hit"] = True
-        return cached
+        try:
+            cached = read_json(path)
+            if not isinstance(cached, dict):
+                raise ValueError("cache payload is not a JSON object")
+        except (OSError, UnicodeError, ValueError) as exc:
+            messages.append(f"Ignored unreadable visual cache {path.name}: {exc}")
+        else:
+            for key in ("page_index", "slide_index", "image_path", "reason", "origin", "requires_visual_review"):
+                if key in item:
+                    cached[key] = item[key]
+            cached["cache_hit"] = True
+            return cached
 
     started = time.perf_counter()
     result = {key: item.get(key, value) for key, value in VISUAL_FIELDS.items()}
     result["reason"] = item.get("reason", "")
+    result["origin"] = item.get("origin", "")
     result["requires_visual_review"] = item.get("requires_visual_review", True)
     backends: list[str] = []
 
@@ -390,9 +463,17 @@ def has_package_media(manifest: dict[str, Any]) -> bool:
     return False
 
 
-def append_visual_markdown(manifest: dict[str, Any]) -> None:
+def append_visual_markdown(manifest: dict[str, Any], out_dir: Path, messages: list[str]) -> None:
     artifacts = manifest.get("artifacts", {})
-    full_path = Path(artifacts.get("full_markdown", ""))
+    raw_full_path = artifacts.get("full_markdown", "")
+    if not raw_full_path:
+        return
+    full_path = Path(raw_full_path)
+    try:
+        full_path.resolve().relative_to(out_dir.resolve())
+    except (OSError, ValueError):
+        messages.append(f"Skipped visual Markdown update outside output directory: {full_path}")
+        return
     if not full_path.exists():
         return
     base = full_path.read_text(encoding="utf-8")
@@ -412,7 +493,70 @@ def append_visual_markdown(manifest: dict[str, Any]) -> None:
         if item.get("diagram_summary") and item.get("diagram_summary") != item.get("vision_summary"):
             lines.extend(["", "Diagram summary:", "", str(item["diagram_summary"])])
         lines.append("")
-    full_path.write_text(base.rstrip() + "\n" + "\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    atomic_write_text(full_path, base.rstrip() + "\n" + "\n".join(lines).rstrip() + "\n")
+
+
+def update_completeness_score(manifest: dict[str, Any], enable_openai: bool) -> dict[str, Any]:
+    structure = manifest.get("structure", [])
+    tables = manifest.get("tables", [])
+    warnings = manifest.get("warnings", [])
+    visual = manifest.get("visual_findings", [])
+    required_visual = [item for item in visual if item.get("requires_visual_review")]
+    weak_backends = {"", "ooxml", "ooxml-media", "visual-unavailable"}
+    understood_visual = [
+        item
+        for item in required_visual
+        if item.get("ocr_text") or (item.get("vision_summary") and item.get("backend", "") not in weak_backends)
+    ]
+
+    textual_score = 100 if structure else 0
+    table_score = 100
+    visual_score = 100 if not required_visual else round(100 * len(understood_visual) / len(required_visual))
+    health_score = max(0, 100 - 10 * len(warnings))
+    components = {
+        "textual_structure": {
+            "score": textual_score,
+            "weight": 45,
+            "extracted_item_count": len(structure),
+        },
+        "table_extraction": {
+            "score": table_score,
+            "weight": 15,
+            "extracted_table_count": len(tables),
+        },
+        "visual_review": {
+            "score": visual_score,
+            "weight": 30,
+            "required_item_count": len(required_visual),
+            "understood_item_count": len(understood_visual),
+        },
+        "extraction_health": {
+            "score": health_score,
+            "weight": 10,
+            "warning_count": len(warnings),
+        },
+    }
+    score = round(sum(item["score"] * item["weight"] for item in components.values()) / 100)
+    gaps: list[str] = []
+    if not structure:
+        gaps.append("No readable body or slide structure was extracted.")
+    unresolved_visual = len(required_visual) - len(understood_visual)
+    if unresolved_visual:
+        gaps.append(f"{unresolved_visual} visual item(s) still require OCR or visual confirmation.")
+    if warnings:
+        gaps.append(f"{len(warnings)} extraction warning(s) should be reviewed.")
+    visual_status = manifest.get("visual_analysis", {}).get("status")
+    if required_visual and visual_status in {"skipped", "partial"}:
+        gaps.append(f"Visual analysis status is {visual_status}; use a deeper mode or additional backends for higher confidence.")
+    result = {
+        "score": score,
+        "grade": "high" if score >= 90 else "medium" if score >= 70 else "low",
+        "components": components,
+        "openai_vision_enabled": enable_openai,
+        "remaining_gaps": gaps,
+    }
+    manifest["completeness_score"] = result
+    return result
 
 
 def enrich_manifest(
@@ -426,6 +570,7 @@ def enrich_manifest(
     manifest = read_json(manifest_path)
     manifest["reading_mode"] = mode
     visual = manifest.setdefault("visual_findings", [])
+    visual[:] = [item for item in visual if not is_rendered_page_finding(item)]
     if not visual:
         visual.append({"requires_visual_review": False, "reason": "no visual findings recorded"})
     for item in visual:
@@ -449,8 +594,9 @@ def enrich_manifest(
             item["vision_summary"] = item.get("vision_summary") or item.get("reason", "")
         analysis["status"] = "skipped"
         manifest["visual_analysis"] = analysis
+        update_completeness_score(manifest, enable_openai)
+        append_visual_markdown(manifest, out_dir, messages)
         write_json(manifest_path, manifest)
-        append_visual_markdown(manifest)
         return manifest
 
     cache_dir = out_dir / ".office-reader-cache"
@@ -480,6 +626,7 @@ def enrich_manifest(
                 "slide_index": page_index_from_image(page) if manifest.get("document_type") == "pptx" else None,
                 "image_path": str(page),
                 "reason": "rendered page selected for visual deep read",
+                "origin": "rendered-page",
                 "requires_visual_review": True,
             }
         )
@@ -523,8 +670,9 @@ def enrich_manifest(
             messages.append("No visual work items were selected.")
     manifest["visual_analysis"] = analysis
     manifest.setdefault("artifacts", {})["visual_cache_dir"] = str(cache_dir)
+    update_completeness_score(manifest, enable_openai)
+    append_visual_markdown(manifest, out_dir, messages)
     write_json(manifest_path, manifest)
-    append_visual_markdown(manifest)
     return manifest
 
 
@@ -535,7 +683,7 @@ def main() -> int:
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--mode", choices=["fast", "balanced", "complete"], default="balanced")
     parser.add_argument("--no-openai-vision", action="store_true")
-    parser.add_argument("--timeout-seconds", type=int, default=90)
+    parser.add_argument("--timeout-seconds", type=positive_int, default=90)
     args = parser.parse_args()
 
     try:
