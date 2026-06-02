@@ -350,12 +350,26 @@ $messages = @()
 if ($outputCollisionMessage) {
     $messages += $outputCollisionMessage
 }
+
+function Get-DiscoveredBackend {
+    param([string]$Backend)
+    if ($Backend -eq "office-com") { return $discovery.backends.office_com }
+    if ($Backend -eq "wps") { return $discovery.backends.wps }
+    if ($Backend -eq "libreoffice") { return $discovery.backends.libreoffice }
+    return $null
+}
+
 $ordered = @("office-com", "wps", "libreoffice")
 if ($PreferredBackend -ne "auto") {
     $ordered = @($PreferredBackend) + ($ordered | Where-Object { $_ -ne $PreferredBackend })
 }
 
 foreach ($backend in $ordered) {
+    $discoveredBackend = Get-DiscoveredBackend -Backend $backend
+    if ($discoveredBackend -and -not $discoveredBackend.available) {
+        $messages += "${backend}: Skipping worker because discovery reported unavailable: $($discoveredBackend.reason)"
+        continue
+    }
     $result = Invoke-BackendWorker -Backend $backend -SourcePath $input -OutputDirectory $outDir -Timeout $TimeoutSeconds
     if ($result.status -eq "success") {
         $messages += @($result.messages)

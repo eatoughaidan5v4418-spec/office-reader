@@ -137,6 +137,80 @@ function Resolve-LibreOfficeExecutable {
     return ""
 }
 
+function Get-PreviewHealthPath {
+    if (-not [string]::IsNullOrWhiteSpace($env:OFFICE_READER_PREVIEW_HEALTH_PATH)) {
+        return $env:OFFICE_READER_PREVIEW_HEALTH_PATH
+    }
+    $root = if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        $env:LOCALAPPDATA
+    } else {
+        [IO.Path]::GetTempPath()
+    }
+    Join-Path $root "office-reader\preview-backend-health.json"
+}
+
+function Read-PreviewHealth {
+    $path = Get-PreviewHealthPath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return [pscustomobject]@{}
+    }
+    try {
+        $health = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($health) { return $health }
+    } catch {}
+    [pscustomobject]@{}
+}
+
+function Write-PreviewHealth {
+    param($Health)
+    $path = Get-PreviewHealthPath
+    try {
+        $parent = Split-Path -Parent $path
+        if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+        $temporary = "$path.$([guid]::NewGuid().ToString('N')).tmp"
+        try {
+            $Health | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $temporary -Encoding UTF8
+            Move-Item -LiteralPath $temporary -Destination $path -Force
+        } finally {
+            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        }
+    } catch {}
+}
+
+function Set-PreviewComDegraded {
+    param([string]$Extension, [string]$Reason)
+    if ($Extension -ne ".docx") { return }
+    $health = Read-PreviewHealth
+    $health | Add-Member -NotePropertyName "word-com-preview" -NotePropertyValue ([pscustomobject]@{
+        prefer_libreoffice_until_utc = [DateTime]::UtcNow.AddDays(7).ToString("o")
+        reason = $Reason
+        updated_utc = [DateTime]::UtcNow.ToString("o")
+    }) -Force
+    Write-PreviewHealth -Health $health
+}
+
+function Clear-PreviewComDegraded {
+    param([string]$Extension)
+    if ($Extension -ne ".docx") { return }
+    $health = Read-PreviewHealth
+    if ($health.PSObject.Properties.Name -contains "word-com-preview") {
+        $health.PSObject.Properties.Remove("word-com-preview")
+        Write-PreviewHealth -Health $health
+    }
+}
+
+function Test-PreferLibreOfficePreview {
+    param([string]$Extension)
+    if ($Extension -ne ".docx") { return $false }
+    try {
+        $entry = (Read-PreviewHealth)."word-com-preview"
+        if (-not $entry.prefer_libreoffice_until_utc) { return $false }
+        return [DateTime]::Parse($entry.prefer_libreoffice_until_utc).ToUniversalTime() -gt [DateTime]::UtcNow
+    } catch {
+        return $false
+    }
+}
+
 function Invoke-ComWorker {
     param(
         [string]$SourcePath,
@@ -174,6 +248,7 @@ function Invoke-ComWorker {
         try { $process.WaitForExit(2000) | Out-Null } catch {}
         Start-Sleep -Milliseconds 200
         Stop-NewAutomationProcesses -Before $automationBefore
+        Set-PreviewComDegraded -Extension $ext -Reason "timeout"
         $message = "Preview rendering timed out after $Timeout seconds."
         if (Test-Path -LiteralPath $stderr) {
             $errorText = (Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue).Trim()
@@ -221,6 +296,33 @@ if ($outputCollisionMessage) {
     $messages += $outputCollisionMessage
 }
 $skipInlineCom = $false
+$preferLibreOffice = (-not $ComWorker) -and (Test-PreferLibreOfficePreview -Extension $ext)
+
+if ($preferLibreOffice) {
+    $messages += "Preview backend health memory prefers LibreOffice before Word COM after a recent Word COM timeout."
+    Remove-PartialPreview -Path $pdfPath
+    $preferredSoffice = Resolve-LibreOfficeExecutable
+    if ($preferredSoffice) {
+        try {
+            $preferredProfile = Join-Path $outDir (".lo_profile_" + [guid]::NewGuid().ToString("N"))
+            New-Item -ItemType Directory -Force -Path $preferredProfile | Out-Null
+            try {
+                & $preferredSoffice --headless "-env:UserInstallation=file:///$($preferredProfile.Replace('\','/'))" --convert-to pdf --outdir $outDir $sourcePath | Out-Null
+                if (Test-Path -LiteralPath $pdfPath) {
+                    New-PreviewResult -Status "success" -Backend "libreoffice" -Artifacts @($pdfPath) -Messages @($messages + "Exported preview PDF with preferred LibreOffice backend.") | ConvertTo-SafeJson -Depth 5
+                    exit 0
+                }
+            } finally {
+                Remove-LibreOfficeProfile -OutputDirectory $outDir -ProfilePath $preferredProfile
+            }
+        } catch {
+            $messages += "Preferred LibreOffice preview failed: $($_.Exception.Message)"
+        }
+    } else {
+        $messages += "Preferred LibreOffice preview backend was not found; retrying the normal preview order."
+    }
+    Remove-PartialPreview -Path $pdfPath
+}
 
 if (-not $ComWorker) {
     $hasOfficeCom = (
@@ -249,12 +351,14 @@ if (-not $ComWorker) {
                 try { $process.WaitForExit(2000) | Out-Null } catch {}
                 Start-Sleep -Milliseconds 200
                 Stop-NewAutomationProcesses -Before $automationBefore
+                Set-PreviewComDegraded -Extension $ext -Reason "timeout"
                 $messages += "Office COM preview timed out after $TimeoutSeconds seconds; continuing to fallback preview backends."
             } else {
                 $workerText = if (Test-Path -LiteralPath $workerJson) { Get-Content -LiteralPath $workerJson -Raw } else { "" }
                 try {
                     $workerResult = $workerText | ConvertFrom-Json
                     if ($workerResult.status -eq "success") {
+                        Clear-PreviewComDegraded -Extension $ext
                         if ($outputCollisionMessage) {
                             $workerResult.messages = @($outputCollisionMessage) + @($workerResult.messages)
                         }
@@ -292,6 +396,7 @@ if (-not $skipInlineCom) {
                 $word.Quit()
             }
             if (Test-Path -LiteralPath $pdfPath) {
+                Clear-PreviewComDegraded -Extension $ext
                 New-PreviewResult -Status "success" -Backend "office-com" -Artifacts @($pdfPath) -Messages @($messages + "Exported DOCX preview PDF with Word COM.") | ConvertTo-SafeJson -Depth 5
                 exit 0
             }

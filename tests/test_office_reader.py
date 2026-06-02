@@ -230,6 +230,14 @@ def make_pptx_with_late_relationship_comment(path):
 
 
 class OfficeReaderTests(unittest.TestCase):
+    def setUp(self):
+        self.preview_health_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.preview_health_tmp.cleanup)
+        health_path = Path(self.preview_health_tmp.name) / "preview-health.json"
+        environment = patch.dict(os.environ, {"OFFICE_READER_PREVIEW_HEALTH_PATH": str(health_path)})
+        environment.start()
+        self.addCleanup(environment.stop)
+
     def run_script(self, script_name, *args):
         script = SCRIPTS_DIR / script_name
         proc = subprocess.run(
@@ -1863,6 +1871,12 @@ class OfficeReaderTests(unittest.TestCase):
         failure_messages = script_text.index("foreach ($message in @($result.messages))")
         self.assertLess(failure_cleanup, failure_messages)
 
+    def test_legacy_conversion_skips_workers_for_discovered_unavailable_backends(self):
+        script_text = (SCRIPTS_DIR / "convert_legacy_office.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("function Get-DiscoveredBackend", script_text)
+        self.assertIn("Skipping worker because discovery reported unavailable", script_text)
+
     def test_render_preview_com_worker_failure_can_continue_to_later_backends(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -1924,6 +1938,83 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertTrue((out_dir / "board-memo.pdf").exists())
             self.assertFalse(list(out_dir.glob("preview-worker-*")))
             self.assertFalse(list(out_dir.glob(".lo_profile_*")))
+
+    def test_render_preview_prefers_libreoffice_after_cached_word_com_timeout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "board-memo.docx"
+            out_dir = tmp_path / "preview"
+            health_path = tmp_path / "preview-health.json"
+            fake_soffice = tmp_path / "soffice.cmd"
+            make_docx(source)
+            health_path.write_text(
+                json.dumps(
+                    {
+                        "word-com-preview": {
+                            "prefer_libreoffice_until_utc": "2999-01-01T00:00:00Z",
+                            "reason": "timeout",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            fake_soffice.write_text(
+                "@echo off\r\n"
+                "set OUTDIR=\r\n"
+                ":args\r\n"
+                "if \"%~1\"==\"\" goto doneargs\r\n"
+                "if \"%~1\"==\"--outdir\" (\r\n"
+                "  set OUTDIR=%~2\r\n"
+                "  shift\r\n"
+                ")\r\n"
+                "shift\r\n"
+                "goto args\r\n"
+                ":doneargs\r\n"
+                "echo fake pdf> \"%OUTDIR%\\board-memo.pdf\"\r\n"
+                "exit /b 0\r\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["SOFFICE_PATH"] = str(fake_soffice)
+            env["OFFICE_READER_PREVIEW_HEALTH_PATH"] = str(health_path)
+
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(SCRIPTS_DIR / "render_preview.ps1"),
+                    "-InputPath",
+                    str(source),
+                    "-OutputDir",
+                    str(out_dir),
+                    "-TimeoutSeconds",
+                    "1",
+                    "-ContinueAfterComFailure",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+                env=env,
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["backend"], "libreoffice")
+            self.assertTrue(any("health memory" in message.lower() for message in data["messages"]))
+
+    def test_render_preview_records_word_com_timeout_health_memory(self):
+        script_text = (SCRIPTS_DIR / "render_preview.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("function Set-PreviewComDegraded", script_text)
+        self.assertIn('Set-PreviewComDegraded -Extension $ext -Reason "timeout"', script_text)
+        self.assertIn("OFFICE_READER_PREVIEW_HEALTH_PATH", script_text)
 
     def test_render_preview_preserves_existing_pdf(self):
         with tempfile.TemporaryDirectory() as tmp:

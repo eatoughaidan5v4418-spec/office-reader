@@ -105,6 +105,8 @@ Keep real source documents, derived `.ppt` files, caches, and smoke output local
 
 For long Word documents, raise `--visual-timeout-seconds` during smoke validation so Office COM preview has time to fail cleanly and LibreOffice fallback can still render pages.
 
+Modern DOCX preview records a private machine-local health entry after a Word COM timeout. For seven days, later previews try LibreOffice first and fall back to the normal COM-first route if needed. This does not change legacy `.doc`/`.ppt` conversion order. Set `OFFICE_READER_PREVIEW_HEALTH_PATH` when an isolated cache is required.
+
 PowerShell JSON output is ASCII-safe so Unicode and space-containing paths remain parseable when stdout is redirected across Windows console code pages.
 
 ## Common Mistakes

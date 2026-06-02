@@ -30,6 +30,8 @@ If Microsoft Office COM, WPS, and LibreOffice are all unavailable, explain that 
 
 Each legacy conversion backend has an isolated 45-second default timeout. Timeout CLI arguments must be positive integers. If a backend hangs, report its timeout message and continue to the next fallback. Cleanup stops the timed-out worker process tree and newly launched Office automation PIDs that COM reparented outside that tree. Do not kill Office automation PIDs that existed before the worker started.
 
+Legacy conversion discovery skips worker startup for backends already known to be unavailable. This avoids optional-backend process startup delays without changing the `Office COM -> WPS -> LibreOffice` order for available backends.
+
 The unified reader accepts a successful legacy conversion only when `output_path` is a string naming an existing `.docx` or `.pptx` artifact inside the selected output directory. Redirected, missing, malformed, or wrong-extension normalized artifacts are rejected.
 
 Use `scripts/smoke_office_reader.py` for local real-document validation. Keep source documents, derived `.ppt` files, caches, and smoke artifacts out of the repository.
@@ -59,6 +61,8 @@ Python and PowerShell entrypoints support Unicode and space-containing paths. JS
 Legacy conversion and preview rendering delete their internal worker stdout/stderr files after collecting structured messages. LibreOffice profiles are removed only when they are inside the selected output directory and match the generated `.lo_profile_<guid>` naming pattern. Do not recursively delete broader output directories during cleanup.
 
 Legacy conversion and preview timeout cleanup stop the current worker process tree and only the Office automation PIDs absent from the pre-worker snapshot. Do not terminate preexisting Office automation processes.
+
+After a Word COM preview timeout, preview rendering records a seven-day private machine-local health entry and tries LibreOffice first on later DOCX previews. If that cache is unreadable, missing, or expired, preview rendering silently uses the normal order. Legacy `.doc`/`.ppt` conversion remains Office COM first.
 
 Legacy conversion does not overwrite an existing normalized `.docx` or `.pptx`. When a same-name file already exists in the output directory, the new artifact is written under a run-specific `legacy-normalized-<guid>` subdirectory.
 

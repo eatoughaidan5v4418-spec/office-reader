@@ -8,7 +8,7 @@ It reads `.doc`, `.docx`, `.ppt`, and `.pptx` into:
 - `<basename>.manifest.json`
 - `<basename>.report.md`
 
-The default path is Microsoft Office COM first for legacy conversion/rendering, then optional WPS, then LibreOffice. Visual deep reading combines OOXML extraction, rendered page/slide analysis, local OCR, optional OpenAI vision, and cache reuse.
+The default path is Microsoft Office COM first for legacy conversion and rendering, then optional WPS for legacy conversion, then LibreOffice. After a Word COM preview timeout, modern DOCX preview remembers the local slowdown for seven days and tries LibreOffice first; legacy conversion order stays unchanged. Visual deep reading combines OOXML extraction, rendered page/slide analysis, local OCR, optional OpenAI vision, and cache reuse.
 
 Legacy `.doc` and `.ppt` conversion runs each backend in an isolated worker. A backend that exceeds the default 45-second budget is stopped before the reader continues to the next fallback.
 
@@ -51,6 +51,8 @@ python scripts\smoke_office_reader.py --doc C:\path\file.doc --docx C:\path\file
 
 The smoke harness keeps real inputs and derived legacy files local. Derived PPT fixtures use unique `<stem>.derived-<guid>.ppt` names so repeated checks do not overwrite an existing file. Do not commit them.
 Use a larger `--visual-timeout-seconds` value for long Word documents whose complete-mode preview export may need to fall back from Office COM to LibreOffice.
+
+DOCX preview health memory is private machine-local state under `%LOCALAPPDATA%\office-reader\preview-backend-health.json`. Override it with `OFFICE_READER_PREVIEW_HEALTH_PATH` for isolated validation.
 
 ## Validation
 
