@@ -45,11 +45,15 @@ For DOCX media relationships found inside a table cell, entries under `visual_fi
 
 For PPTX slides, entries under `visual_findings[].objects` may include a structured visual object inventory:
 
-- `object_type`: `image`, `chart`, or another visual risk type.
+- `object_type`: `image`, `chart`, `smartart`, `ole`, `video`, `audio`, or another visual risk type.
 - `slide_index`: slide location.
 - `name`, `alt_text`, and `title`: non-visual DrawingML metadata when present.
-- `relationship_id` and `target`: relationship identifier and resolved package target.
+- `relationship_id`, `relationship_type`, `target`, and `target_mode`: relationship identifier, relationship type, resolved package target, and external/internal target mode when present.
 - `geometry`: EMU coordinates with `x`, `y`, `cx`, and `cy` when the object has an `a:xfrm`.
+- `relationships`: SmartArt relationship list with role names such as `data_model`, `layout`, `quick_style`, and `colors`.
+- `prog_id`: OLE program identifier such as `Excel.Sheet.12` when present.
+
+The report repeats this inventory under `Visual Findings` so a caller can see which slide contains image/chart/diagram/embed/media risk before opening the JSON manifest.
 
 If these fields are empty, the report must list the visual gap instead of claiming the image content was fully read.
 

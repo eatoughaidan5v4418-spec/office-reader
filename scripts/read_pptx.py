@@ -28,6 +28,16 @@ from common_ooxml import (
 )
 
 
+R_LINK = qn("r", "link")
+R_ID = qn("r", "id")
+DIAGRAM_REL_ATTRS = {
+    qn("r", "dm"): "data_model",
+    qn("r", "lo"): "layout",
+    qn("r", "qs"): "quick_style",
+    qn("r", "cs"): "colors",
+}
+
+
 def slide_number(path: str) -> int:
     match = re.search(r"slide(\d+)\.xml$", path)
     return int(match.group(1)) if match else 0
@@ -114,6 +124,16 @@ def rel_target(slide_path: str, rel: dict[str, str]) -> str:
     return resolve_part_path(slide_path, target) if target else ""
 
 
+def relationship_ref(slide_path: str, rels: dict[str, dict[str, str]], rel_id: str) -> dict[str, str]:
+    rel = rels.get(rel_id, {})
+    return {
+        "relationship_id": rel_id,
+        "relationship_type": rel.get("type", ""),
+        "target": rel_target(slide_path, rel),
+        "target_mode": rel.get("target_mode", ""),
+    }
+
+
 def non_visual_props(node) -> dict[str, str]:
     props = node.find(".//p:cNvPr", NS)
     if props is None:
@@ -126,7 +146,7 @@ def non_visual_props(node) -> dict[str, str]:
 
 
 def transform_geometry(node) -> dict[str, int]:
-    xfrm = node.find(".//a:xfrm", NS)
+    xfrm = node.find(".//a:xfrm", NS) or node.find(".//p:xfrm", NS)
     if xfrm is None:
         return {}
     off = xfrm.find("a:off", NS)
@@ -151,6 +171,61 @@ def visual_object_base(node, object_type: str) -> dict[str, Any]:
     return base
 
 
+def append_visual_object(objects: list[dict[str, Any]], item: dict[str, Any]) -> None:
+    key = (
+        item.get("slide_index"),
+        item.get("object_type"),
+        item.get("relationship_id"),
+        item.get("target"),
+        item.get("name"),
+        item.get("prog_id"),
+    )
+    for existing in objects:
+        existing_key = (
+            existing.get("slide_index"),
+            existing.get("object_type"),
+            existing.get("relationship_id"),
+            existing.get("target"),
+            existing.get("name"),
+            existing.get("prog_id"),
+        )
+        if existing_key == key:
+            return
+    objects.append(item)
+
+
+def relationship_id_from(node) -> str:
+    for attr in (R_EMBED, R_LINK, R_ID):
+        value = node.attrib.get(attr, "")
+        if value:
+            return value
+    return ""
+
+
+def diagram_relationships(node, slide_path: str, rels: dict[str, dict[str, str]]) -> list[dict[str, str]]:
+    refs: list[dict[str, str]] = []
+    for rel_ids in node.iter(qn("dgm", "relIds")):
+        for attr, role in DIAGRAM_REL_ATTRS.items():
+            rel_id = rel_ids.attrib.get(attr, "")
+            if rel_id:
+                refs.append({"role": role, **relationship_ref(slide_path, rels, rel_id)})
+    return refs
+
+
+def extract_media_file_objects(node, slide_path: str, slide_index: int, rels: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
+    media_objects: list[dict[str, Any]] = []
+    for child in node.iter():
+        tag_name = local_name_fallback(child.tag)
+        if tag_name not in {"videoFile", "audioFile", "wavAudioFile"}:
+            continue
+        object_type = "video" if tag_name == "videoFile" else "audio"
+        rel_id = relationship_id_from(child)
+        item = visual_object_base(node, object_type)
+        item.update({"slide_index": slide_index, **relationship_ref(slide_path, rels, rel_id)})
+        media_objects.append(item)
+    return media_objects
+
+
 def extract_visual_objects(slide_root, slide_path: str, slide_index: int, rels: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
     objects: list[dict[str, Any]] = []
     for pic in slide_root.iter(qn("p", "pic")):
@@ -158,21 +233,47 @@ def extract_visual_objects(slide_root, slide_path: str, slide_index: int, rels: 
         blip = next(pic.iter(qn("a", "blip")), None)
         if blip is not None:
             rel_id = blip.attrib.get(R_EMBED, "")
-            rel = rels.get(rel_id, {})
-            item.update({"relationship_id": rel_id, "target": rel_target(slide_path, rel)})
+            item.update(relationship_ref(slide_path, rels, rel_id))
         item["slide_index"] = slide_index
-        objects.append(item)
+        append_visual_object(objects, item)
+        for media_item in extract_media_file_objects(pic, slide_path, slide_index, rels):
+            append_visual_object(objects, media_item)
 
-    for chart in slide_root.iter(qn("c", "chart")):
-        rel_id = chart.attrib.get(qn("r", "id"), "")
-        rel = rels.get(rel_id, {})
-        item = {
-            "slide_index": slide_index,
-            "object_type": "chart",
-            "relationship_id": rel_id,
-            "target": rel_target(slide_path, rel),
-        }
-        objects.append(item)
+    for frame in slide_root.iter(qn("p", "graphicFrame")):
+        for chart in frame.iter(qn("c", "chart")):
+            rel_id = chart.attrib.get(R_ID, "")
+            item = visual_object_base(frame, "chart")
+            item.update({"slide_index": slide_index, **relationship_ref(slide_path, rels, rel_id)})
+            append_visual_object(objects, item)
+
+        has_diagram_uri = any(
+            "diagram" in graphic_data.attrib.get("uri", "").lower()
+            for graphic_data in frame.iter(qn("a", "graphicData"))
+        )
+        diagram_rels = diagram_relationships(frame, slide_path, rels)
+        if has_diagram_uri or diagram_rels:
+            item = visual_object_base(frame, "smartart")
+            item.update({"slide_index": slide_index, "relationships": diagram_rels})
+            append_visual_object(objects, item)
+
+        for ole in frame.iter(qn("p", "oleObj")):
+            rel_id = relationship_id_from(ole)
+            item = visual_object_base(frame, "ole")
+            item.update(
+                {
+                    "slide_index": slide_index,
+                    "prog_id": ole.attrib.get("progId", ""),
+                    **relationship_ref(slide_path, rels, rel_id),
+                }
+            )
+            append_visual_object(objects, item)
+
+        for media_item in extract_media_file_objects(frame, slide_path, slide_index, rels):
+            append_visual_object(objects, media_item)
+
+    for shape in slide_root.iter(qn("p", "sp")):
+        for media_item in extract_media_file_objects(shape, slide_path, slide_index, rels):
+            append_visual_object(objects, media_item)
 
     return objects
 

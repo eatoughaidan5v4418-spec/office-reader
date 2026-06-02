@@ -63,7 +63,7 @@ Detailed behavior is in `references/backend_fallbacks.md`.
 
 For `.docx`, extract document metadata, paragraphs, heading levels, tables, comments, tracked insertions and deletions, media references, and a visual-review flag when drawings or media are present.
 
-For `.pptx`, extract presentation metadata, slide order, slide text, tables, speaker notes, comments, media references, and per-slide visual-review flags when media is present.
+For `.pptx`, extract presentation metadata, slide order, slide text, tables, speaker notes, comments, media references, and per-slide visual-review flags when media is present. PPTX visual findings include an object inventory for images, charts, SmartArt, OLE objects, video, and audio when the relationship metadata is present in the slide XML.
 
 XML extraction does not fully read text inside images, screenshots, rasterized charts, SmartArt, or complex embedded objects. In `balanced` or `complete` mode, the visual pipeline renders pages/slides when possible, applies local OCR, optionally asks OpenAI vision for diagram/chart/screenshot interpretation, caches results, and writes findings back into `visual_findings`.
 

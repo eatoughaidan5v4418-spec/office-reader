@@ -133,6 +133,63 @@ def make_pptx(path):
     write_zip(path, files)
 
 
+def make_pptx_with_complex_visual_objects(path):
+    files = {
+        "ppt/presentation.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+                xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst>
+</p:presentation>""",
+        "ppt/_rels/presentation.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>""",
+        "ppt/slides/slide1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+       xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:cSld><p:spTree>
+    <p:sp><p:txBody><a:p><a:r><a:t>Complex Objects</a:t></a:r></a:p></p:txBody></p:sp>
+    <p:graphicFrame>
+      <p:nvGraphicFramePr><p:cNvPr id="4" name="Process SmartArt" descr="Approval workflow"/></p:nvGraphicFramePr>
+      <p:xfrm><a:off x="1000" y="2000"/><a:ext cx="3000" cy="4000"/></p:xfrm>
+      <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram">
+        <dgm:relIds r:dm="rIdDgmData" r:lo="rIdDgmLayout" r:qs="rIdDgmQuickStyle" r:cs="rIdDgmColors"/>
+      </a:graphicData></a:graphic>
+    </p:graphicFrame>
+    <p:graphicFrame>
+      <p:nvGraphicFramePr><p:cNvPr id="5" name="Embedded workbook"/></p:nvGraphicFramePr>
+      <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/presentationml/2006/ole">
+        <p:oleObj r:id="rIdOle1" progId="Excel.Sheet.12" name="Workbook data"/>
+      </a:graphicData></a:graphic>
+    </p:graphicFrame>
+    <p:pic>
+      <p:nvPicPr><p:cNvPr id="6" name="Video poster"/><p:nvPr><a:videoFile r:link="rIdVideo1"/></p:nvPr></p:nvPicPr>
+      <p:blipFill><a:blip r:embed="rIdPoster"/></p:blipFill>
+    </p:pic>
+    <p:pic>
+      <p:nvPicPr><p:cNvPr id="7" name="Audio icon"/><p:nvPr><a:wavAudioFile r:embed="rIdAudio1"/></p:nvPr></p:nvPicPr>
+      <p:blipFill><a:blip r:embed="rIdAudioIcon"/></p:blipFill>
+    </p:pic>
+  </p:spTree></p:cSld>
+</p:sld>""",
+        "ppt/slides/_rels/slide1.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdDgmData" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagramData" Target="../diagrams/data1.xml"/>
+  <Relationship Id="rIdDgmLayout" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagramLayout" Target="../diagrams/layout1.xml"/>
+  <Relationship Id="rIdDgmQuickStyle" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagramQuickStyle" Target="../diagrams/quickStyle1.xml"/>
+  <Relationship Id="rIdDgmColors" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagramColors" Target="../diagrams/colors1.xml"/>
+  <Relationship Id="rIdOle1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" Target="../embeddings/oleObject1.bin"/>
+  <Relationship Id="rIdVideo1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/video" Target="../media/movie1.mp4" TargetMode="External"/>
+  <Relationship Id="rIdAudio1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/audio" Target="../media/audio1.wav"/>
+  <Relationship Id="rIdPoster" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/poster.png"/>
+  <Relationship Id="rIdAudioIcon" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/audio.png"/>
+</Relationships>""",
+    }
+    write_zip(path, files)
+
+
 class OfficeReaderTests(unittest.TestCase):
     def run_script(self, script_name, *args):
         script = SCRIPTS_DIR / script_name
@@ -211,6 +268,51 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(chart["relationship_id"], "rIdChart1")
             self.assertEqual(chart["target"], "ppt/charts/chart1.xml")
 
+    def test_pptx_reader_inventories_complex_visual_objects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "complex-objects.pptx"
+            out_dir = tmp_path / "out"
+            make_pptx_with_complex_visual_objects(source)
+
+            self.run_script("read_pptx.py", source, "--out-dir", out_dir)
+
+            manifest = json.loads((out_dir / "complex-objects.manifest.json").read_text(encoding="utf-8"))
+            finding = manifest["visual_findings"][0]
+            self.assertTrue(finding["requires_visual_review"])
+            objects = finding["objects"]
+            object_types = {item["object_type"] for item in objects}
+            self.assertTrue({"smartart", "ole", "video", "audio"}.issubset(object_types))
+
+            smartart = next(item for item in objects if item["object_type"] == "smartart")
+            self.assertEqual(smartart["name"], "Process SmartArt")
+            self.assertEqual(smartart["alt_text"], "Approval workflow")
+            self.assertEqual(smartart["geometry"], {"x": 1000, "y": 2000, "cx": 3000, "cy": 4000})
+            self.assertEqual(
+                {rel["role"]: rel["target"] for rel in smartart["relationships"]},
+                {
+                    "data_model": "ppt/diagrams/data1.xml",
+                    "layout": "ppt/diagrams/layout1.xml",
+                    "quick_style": "ppt/diagrams/quickStyle1.xml",
+                    "colors": "ppt/diagrams/colors1.xml",
+                },
+            )
+
+            ole = next(item for item in objects if item["object_type"] == "ole")
+            self.assertEqual(ole["name"], "Embedded workbook")
+            self.assertEqual(ole["prog_id"], "Excel.Sheet.12")
+            self.assertEqual(ole["relationship_id"], "rIdOle1")
+            self.assertEqual(ole["target"], "ppt/embeddings/oleObject1.bin")
+
+            video = next(item for item in objects if item["object_type"] == "video")
+            self.assertEqual(video["relationship_id"], "rIdVideo1")
+            self.assertEqual(video["target"], "ppt/media/movie1.mp4")
+            self.assertEqual(video["target_mode"], "External")
+
+            audio = next(item for item in objects if item["object_type"] == "audio")
+            self.assertEqual(audio["relationship_id"], "rIdAudio1")
+            self.assertEqual(audio["target"], "ppt/media/audio1.wav")
+
     def test_report_assembler_uses_manifest_counts_and_outline(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -228,7 +330,29 @@ class OfficeReaderTests(unittest.TestCase):
                         "comments": [{"text": "Clarify launch date."}],
                         "revisions": [],
                         "notes": [{"slide_index": 1, "text": "Ask support to confirm staffing."}],
-                        "visual_findings": [{"requires_visual_review": True, "reason": "slide has media"}],
+                        "visual_findings": [
+                            {
+                                "requires_visual_review": True,
+                                "reason": "slide has media",
+                                "slide_index": 1,
+                                "objects": [
+                                    {
+                                        "object_type": "smartart",
+                                        "name": "Process SmartArt",
+                                        "relationships": [
+                                            {"role": "data_model", "target": "ppt/diagrams/data1.xml"}
+                                        ],
+                                    },
+                                    {
+                                        "object_type": "ole",
+                                        "name": "Embedded workbook",
+                                        "prog_id": "Excel.Sheet.12",
+                                        "relationship_id": "rIdOle1",
+                                        "target": "ppt/embeddings/oleObject1.bin",
+                                    },
+                                ],
+                            }
+                        ],
                         "artifacts": {"full_markdown": "sample.full.md"},
                     }
                 ),
@@ -243,6 +367,9 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertIn("- Comments: 1", report)
             self.assertIn("Launch Readiness", report)
             self.assertIn("Clarify launch date.", report)
+            self.assertIn("Object: smartart", report)
+            self.assertIn("data_model=ppt/diagrams/data1.xml", report)
+            self.assertIn("prog_id=Excel.Sheet.12", report)
 
     def test_backend_discovery_emits_json_shape(self):
         script = SCRIPTS_DIR / "discover_office_backends.ps1"

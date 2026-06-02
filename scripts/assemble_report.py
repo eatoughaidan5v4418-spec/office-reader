@@ -20,6 +20,34 @@ def bullet(label: str, value: Any) -> str:
     return f"- {label}: {value}"
 
 
+def visual_object_summary(item: dict[str, Any]) -> str:
+    parts = [str(item.get("object_type", "object"))]
+    if item.get("name"):
+        parts.append(f"name={item.get('name')}")
+    if item.get("alt_text"):
+        parts.append(f"alt={first_sentence(item.get('alt_text'), 80)}")
+    if item.get("prog_id"):
+        parts.append(f"prog_id={item.get('prog_id')}")
+    if item.get("relationship_id"):
+        parts.append(f"rel={item.get('relationship_id')}")
+    if item.get("target"):
+        parts.append(f"target={item.get('target')}")
+    if item.get("relationships"):
+        roles = ", ".join(
+            f"{rel.get('role', 'rel')}={rel.get('target') or rel.get('relationship_id')}"
+            for rel in item.get("relationships", [])[:6]
+        )
+        if roles:
+            parts.append(f"relationships=({roles})")
+    if item.get("geometry"):
+        geometry = item.get("geometry", {})
+        parts.append(
+            "geometry="
+            + ",".join(str(geometry.get(key, "")) for key in ("x", "y", "cx", "cy"))
+        )
+    return "; ".join(parts)
+
+
 def build_report(manifest: dict[str, Any]) -> str:
     source = manifest.get("source", {})
     name = source.get("name") or Path(source.get("path", "document")).name
@@ -121,6 +149,8 @@ def build_report(manifest: dict[str, Any]) -> str:
             location = f" ({', '.join(location_parts)})" if location_parts else ""
             backend = f", backend: {finding.get('backend')}" if finding.get("backend") else ""
             lines.append(f"- {status}{location}: {finding.get('reason', 'no reason recorded')}{backend}")
+            for item in finding.get("objects", [])[:20]:
+                lines.append(f"  Object: {visual_object_summary(item)}")
     else:
         lines.append("- No visual findings recorded.")
     lines.append("")

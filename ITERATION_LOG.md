@@ -1,5 +1,62 @@
 # Office Reader Iteration Log
 
+## 2026-06-02 - PPTX visual object inventory v2
+
+### Problems Found
+
+- PPTX inventory v1 covered images and charts, but SmartArt, OLE objects, video, and audio were still easy to miss or collapse into coarse media hints.
+- Chart objects did not carry frame-level non-visual metadata or geometry.
+- Reports did not expose `visual_findings[].objects`, so a caller had to open the manifest JSON to see object-level visual risk.
+
+### Changes Completed
+
+- Extended `read_pptx.py` visual object inventory:
+  - SmartArt detection from diagram `graphicData` and `dgm:relIds`.
+  - SmartArt relationship roles for data model, layout, quick style, and colors.
+  - OLE detection with `prog_id`, relationship id, relationship type, target, and target mode.
+  - Video detection from `a:videoFile`.
+  - Audio detection from `a:audioFile` and `a:wavAudioFile`.
+  - Relationship type and target mode are now included for PPTX visual objects when available.
+  - Chart objects now reuse frame metadata and geometry when available.
+- Added object summaries to `assemble_report.py` under `Visual Findings`.
+- Added a synthetic PPTX regression fixture for SmartArt, OLE, external video, and embedded audio.
+- Updated `SKILL.md`, `README.md`, and `references/output_schema.md`.
+
+### Verification
+
+- Focused tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_pptx_reader_inventories_complex_visual_objects tests.test_office_reader.OfficeReaderTests.test_report_assembler_uses_manifest_counts_and_outline -v`
+  - Result: `OK`
+- Syntax check:
+  - `python -m py_compile scripts\read_pptx.py scripts\assemble_report.py`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 22 tests
+- Real document smoke:
+  - Source: `C:\Users\Huang\Desktop\CC\第十八届合泰杯复赛报告书_基于HT32的无感式智能体态与脊柱健康监测垫_终稿.docx`
+  - Output: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\ht32-posture-final-cc-v2`
+  - Result: success
+  - `structure`: 84
+  - `tables`: 7
+  - `visual_analysis.status`: `completed`
+  - `rendered_page_count`: 8
+  - `analyzed_item_count`: 8
+  - `completeness_score.overall`: 92
+  - `unverified_visual_count`: 1
+
+### Remaining Risks
+
+- DOCX headers, footers, footnotes, endnotes, block-level content controls, and textbox-originated content still need deeper extraction and positioning.
+- PPTX group transforms, crop rectangles, rotation, z-order, and layout/master inherited objects are still not modeled.
+- LibreOffice `.lo_profile_*` temporary directories should be cleaned in preview rendering and legacy conversion.
+
+### Next Round Direction
+
+- Run full test suite and real-document smoke for this round, then commit and push.
+- Next implementation round: clean LibreOffice temporary profile directories or add DOCX non-body part extraction, depending on which is lower risk to land first.
+
 ## 2026-06-02 - PPTX visual object inventory v1
 
 ### Problems Found
