@@ -31,6 +31,7 @@ def build_report(manifest: dict[str, Any]) -> str:
     visual = manifest.get("visual_findings", [])
     visual_analysis = manifest.get("visual_analysis", {})
     conversion = manifest.get("conversion", {})
+    completeness = manifest.get("completeness_score", {})
 
     lines: list[str] = [f"# Structured Reading Report: {name}", ""]
     lines.extend(
@@ -45,9 +46,24 @@ def build_report(manifest: dict[str, Any]) -> str:
             bullet("Conversion status", conversion.get("status", "unknown")),
             bullet("Reading mode", manifest.get("reading_mode", "balanced")),
             bullet("Visual analysis", visual_analysis.get("status", "unknown")),
+            bullet("Completeness score", f"{completeness.get('overall', 'unknown')}/100" if completeness else "unknown"),
             "",
         ]
     )
+
+    lines.extend(["## Read Completeness", ""])
+    if completeness:
+        lines.append(bullet("Text coverage", f"{completeness.get('text_coverage', 0)}/100"))
+        lines.append(bullet("Table coverage", f"{completeness.get('table_coverage', 0)}/100"))
+        lines.append(bullet("Visual coverage", f"{completeness.get('visual_coverage', 0)}/100"))
+        lines.append(bullet("OCR confidence", f"{completeness.get('ocr_confidence', 0)}/100"))
+        lines.append(bullet("OpenAI vision enabled", completeness.get("openai_vision_enabled", False)))
+        lines.append(bullet("Unverified visual items", completeness.get("unverified_visual_count", 0)))
+        for signal in completeness.get("signals", [])[:8]:
+            lines.append(f"- Signal: {first_sentence(signal)}")
+    else:
+        lines.append("- No completeness score was recorded.")
+    lines.append("")
 
     lines.extend(["## Outline", ""])
     if structure:

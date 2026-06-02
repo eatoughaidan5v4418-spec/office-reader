@@ -306,6 +306,11 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(visual["mode"], "fast")
             self.assertEqual(visual["rendered_page_count"], 0)
             self.assertIn("fast mode", " ".join(visual["messages"]).lower())
+            score = manifest["completeness_score"]
+            self.assertLess(score["overall"], 80)
+            self.assertEqual(score["visual_coverage"], 0)
+            self.assertGreaterEqual(score["unverified_visual_count"], 1)
+            self.assertFalse(score["openai_vision_enabled"])
 
     def test_report_includes_visual_deep_read_sections(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -359,6 +364,50 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertIn("图中写着 HT32", report)
             self.assertIn("系统框图展示传感器到 MCU 的链路。", report)
             self.assertIn("## Remaining Unverified Visual Gaps", report)
+
+    def test_report_includes_completeness_score_when_manifest_has_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            manifest_path = tmp_path / "sample.manifest.json"
+            report_path = tmp_path / "sample.report.md"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "source": {"path": "sample.docx", "name": "sample.docx"},
+                        "normalized_file": {"path": "sample.docx", "extension": ".docx"},
+                        "conversion": {"required": False, "backend": None, "status": "not_required"},
+                        "document_type": "docx",
+                        "reading_mode": "balanced",
+                        "structure": [{"type": "paragraph", "index": 1, "text": "Body text"}],
+                        "tables": [{"index": 1, "rows": [["Metric", "Value"]]}],
+                        "comments": [],
+                        "revisions": [],
+                        "notes": [],
+                        "visual_analysis": {"status": "partial", "mode": "balanced", "messages": []},
+                        "visual_findings": [{"requires_visual_review": True, "vision_summary": ""}],
+                        "completeness_score": {
+                            "overall": 72,
+                            "text_coverage": 100,
+                            "table_coverage": 100,
+                            "visual_coverage": 25,
+                            "ocr_confidence": 0,
+                            "openai_vision_enabled": False,
+                            "unverified_visual_count": 1,
+                            "signals": ["Visual analysis was partial."],
+                        },
+                        "artifacts": {"full_markdown": "sample.full.md"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.run_script("assemble_report.py", manifest_path, "--out", report_path)
+
+            report = report_path.read_text(encoding="utf-8")
+            self.assertIn("- Completeness score: 72/100", report)
+            self.assertIn("## Read Completeness", report)
+            self.assertIn("- Visual coverage: 25/100", report)
+            self.assertIn("- Unverified visual items: 1", report)
 
     def test_bootstrap_deps_dry_run_reports_install_plan(self):
         script = SCRIPTS_DIR / "bootstrap_deps.ps1"

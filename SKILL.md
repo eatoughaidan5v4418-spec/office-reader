@@ -44,8 +44,8 @@ Portable Poppler/Tesseract builds can be used without system install. Put the fo
 Every successful read produces:
 
 - `<basename>.full.md`: full Markdown transcript with headings, slide boundaries, tables, comments, revisions, and notes where extractable.
-- `<basename>.manifest.json`: structured extraction data plus `reading_mode` and `visual_analysis`. See `references/output_schema.md`.
-- `<basename>.report.md`: structured reading report with summary, outline, tables, comments/revisions, notes, visual findings, risks, and artifacts.
+- `<basename>.manifest.json`: structured extraction data plus `reading_mode`, `visual_analysis`, and `completeness_score`. See `references/output_schema.md`.
+- `<basename>.report.md`: structured reading report with summary, read completeness, outline, tables, comments/revisions, notes, visual findings, risks, and artifacts.
 
 If legacy conversion fails, return the conversion JSON and explain which backends were unavailable. Do not pretend a `.doc` or `.ppt` was read when no normalized `.docx` or `.pptx` exists.
 
@@ -66,6 +66,8 @@ For `.docx`, extract document metadata, paragraphs, heading levels, tables, comm
 For `.pptx`, extract presentation metadata, slide order, slide text, tables, speaker notes, comments, media references, and per-slide visual-review flags when media is present.
 
 XML extraction does not fully read text inside images, screenshots, rasterized charts, SmartArt, or complex embedded objects. In `balanced` or `complete` mode, the visual pipeline renders pages/slides when possible, applies local OCR, optionally asks OpenAI vision for diagram/chart/screenshot interpretation, caches results, and writes findings back into `visual_findings`.
+
+The `completeness_score` is a conservative coverage signal. Do not treat OOXML media hints, fast-mode placeholders, or rendered-page bookkeeping as proof that visual content was understood. Report `unverified_visual_count` and score signals when answering the user.
 
 ## Preview Backend Health Memory
 

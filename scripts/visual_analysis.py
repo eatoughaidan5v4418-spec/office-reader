@@ -415,6 +415,78 @@ def append_visual_markdown(manifest: dict[str, Any]) -> None:
     full_path.write_text(base.rstrip() + "\n" + "\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
+def clamp_score(value: float) -> int:
+    return max(0, min(100, int(round(value))))
+
+
+def has_verified_visual_read(finding: dict[str, Any]) -> bool:
+    backend = str(finding.get("backend", "")).lower()
+    if finding.get("ocr_text") and any(name in backend for name in ("rapidocr", "tesseract")):
+        return True
+    if finding.get("vision_summary") and "openai:" in backend:
+        return True
+    if finding.get("diagram_summary") and "openai:" in backend:
+        return True
+    return False
+
+
+def compute_completeness_score(manifest: dict[str, Any]) -> dict[str, Any]:
+    structure = manifest.get("structure", []) or []
+    tables = manifest.get("tables", []) or []
+    visual = manifest.get("visual_findings", []) or []
+    visual_analysis = manifest.get("visual_analysis", {}) or {}
+    signals: list[str] = []
+
+    if structure:
+        readable = sum(1 for item in structure if (item.get("text") or item.get("title") or "").strip())
+        text_coverage = clamp_score((readable / len(structure)) * 100)
+    else:
+        text_coverage = 0
+        signals.append("No readable body or slide structure was extracted.")
+
+    if tables:
+        readable_tables = sum(1 for table in tables if any(any(str(cell).strip() for cell in row) for row in table.get("rows", [])))
+        table_coverage = clamp_score((readable_tables / len(tables)) * 100)
+    else:
+        table_coverage = 100
+
+    required_visual = [item for item in visual if item.get("requires_visual_review")]
+    verified_visual = [item for item in required_visual if has_verified_visual_read(item)]
+    if required_visual:
+        visual_coverage = clamp_score((len(verified_visual) / len(required_visual)) * 100)
+    else:
+        visual_coverage = 100
+    unverified_visual_count = len(required_visual) - len(verified_visual)
+
+    ocr_items = [
+        item
+        for item in required_visual
+        if item.get("ocr_text") and any(name in str(item.get("backend", "")).lower() for name in ("rapidocr", "tesseract"))
+    ]
+    ocr_confidence = clamp_score((len(ocr_items) / len(required_visual)) * 100) if required_visual else 100
+    openai_enabled = any("openai:" in str(item.get("backend", "")).lower() for item in visual)
+
+    status = visual_analysis.get("status")
+    if status in {"skipped", "partial"} and required_visual:
+        signals.append(f"Visual analysis was {status}.")
+    if unverified_visual_count:
+        signals.append(f"{unverified_visual_count} visual item(s) still need OCR or vision confirmation.")
+    if required_visual and not openai_enabled:
+        signals.append("OpenAI vision was not used for visual interpretation.")
+
+    overall = clamp_score((text_coverage * 0.35) + (table_coverage * 0.15) + (visual_coverage * 0.40) + (ocr_confidence * 0.10))
+    return {
+        "overall": overall,
+        "text_coverage": text_coverage,
+        "table_coverage": table_coverage,
+        "visual_coverage": visual_coverage,
+        "ocr_confidence": ocr_confidence,
+        "openai_vision_enabled": openai_enabled,
+        "unverified_visual_count": unverified_visual_count,
+        "signals": signals,
+    }
+
+
 def enrich_manifest(
     manifest_path: Path,
     normalized_file: Path,
@@ -449,6 +521,7 @@ def enrich_manifest(
             item["vision_summary"] = item.get("vision_summary") or item.get("reason", "")
         analysis["status"] = "skipped"
         manifest["visual_analysis"] = analysis
+        manifest["completeness_score"] = compute_completeness_score(manifest)
         write_json(manifest_path, manifest)
         append_visual_markdown(manifest)
         return manifest
@@ -523,6 +596,7 @@ def enrich_manifest(
             messages.append("No visual work items were selected.")
     manifest["visual_analysis"] = analysis
     manifest.setdefault("artifacts", {})["visual_cache_dir"] = str(cache_dir)
+    manifest["completeness_score"] = compute_completeness_score(manifest)
     write_json(manifest_path, manifest)
     append_visual_markdown(manifest)
     return manifest

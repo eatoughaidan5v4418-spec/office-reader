@@ -10,6 +10,8 @@ It reads `.doc`, `.docx`, `.ppt`, and `.pptx` into:
 
 The default path is Microsoft Office COM first for legacy conversion, then optional WPS, then LibreOffice. Preview rendering uses Office COM when healthy and falls back to LibreOffice; slow or invalid COM preview runs are remembered in `.office-reader-cache/preview-backend-health.json`. Visual deep reading combines OOXML extraction, rendered page/slide analysis, local OCR, optional OpenAI vision, and cache reuse.
 
+Reports include a conservative `completeness_score` so callers can see text/table/visual coverage and remaining unverified visual items. It is a coverage signal, not proof that every visual fact was understood.
+
 ## Quick Start
 
 ```powershell

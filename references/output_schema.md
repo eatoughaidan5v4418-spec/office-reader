@@ -19,6 +19,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `notes`: PowerPoint speaker notes.
 - `visual_analysis`: visual pipeline status, selected mode, rendered page count, analyzed item count, cache hits, backends, and messages.
 - `visual_findings`: flags for media, drawings, image-heavy content, OCR text, rendered-page observations, vision summaries, diagram summaries, confidence, backend, duration, and cache status.
+- `completeness_score`: conservative extraction coverage score. It combines text coverage, table coverage, verified visual coverage, OCR coverage, OpenAI vision use, unverified visual count, and score signals.
 - `artifacts`: paths to generated `.full.md`, `.manifest.json`, and report files.
 
 ## Revision Markers In Markdown
@@ -41,6 +42,21 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `cache_hit`: whether this result came from `.office-reader-cache`.
 
 If these fields are empty, the report must list the visual gap instead of claiming the image content was fully read.
+
+## Completeness Score
+
+`completeness_score` is a conservative coverage signal, not a guarantee that every fact was understood. Visual items count as verified only when local OCR (`rapidocr` or `tesseract`) produced text or OpenAI vision produced a summary. OOXML media hints, fast-mode placeholders, and rendered-page bookkeeping do not count as visual interpretation.
+
+Fields:
+
+- `overall`: 0-100 weighted score.
+- `text_coverage`: readable structure entries divided by extracted structure entries.
+- `table_coverage`: tables with readable cells divided by extracted tables. If no tables exist, this is 100.
+- `visual_coverage`: visually verified items divided by items requiring visual review.
+- `ocr_confidence`: OCR-backed items divided by items requiring visual review.
+- `openai_vision_enabled`: whether an OpenAI vision backend contributed to any visual finding.
+- `unverified_visual_count`: visual-review items still lacking OCR or OpenAI vision confirmation.
+- `signals`: short reasons that explain score limits and remaining risks.
 
 ## Visual Analysis Messages
 
