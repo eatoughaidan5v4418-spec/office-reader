@@ -6,9 +6,11 @@ from __future__ import annotations
 import html
 import json
 import posixpath
+import uuid
 import zipfile
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 
 
@@ -47,8 +49,17 @@ def read_xml(package: zipfile.ZipFile, member: str) -> ET.Element | None:
         return None
 
 
-def read_relationships(package: zipfile.ZipFile, member: str) -> dict[str, dict[str, str]]:
-    root = read_xml(package, member)
+def read_optional_xml(package: zipfile.ZipFile, member: str, warnings: list[str] | None = None) -> ET.Element | None:
+    try:
+        return read_xml(package, member)
+    except ET.ParseError as exc:
+        if warnings is not None:
+            warnings.append(f"Skipped malformed optional OOXML part {member}: {exc}")
+        return None
+
+
+def read_relationships(package: zipfile.ZipFile, member: str, warnings: list[str] | None = None) -> dict[str, dict[str, str]]:
+    root = read_optional_xml(package, member, warnings)
     if root is None:
         return {}
     relationships: dict[str, dict[str, str]] = {}
@@ -66,8 +77,32 @@ def read_relationships(package: zipfile.ZipFile, member: str) -> dict[str, dict[
 
 
 def resolve_part_path(base_part: str, target: str) -> str:
+    parsed = urlsplit(target)
+    if parsed.scheme or parsed.netloc:
+        return ""
     base_dir = posixpath.dirname(base_part)
-    return posixpath.normpath(posixpath.join(base_dir, target)).lstrip("/")
+    resolved = posixpath.normpath(posixpath.join(base_dir, target)).lstrip("/")
+    if resolved == ".." or resolved.startswith("../"):
+        return ""
+    return resolved
+
+
+def relationship_part_path(
+    base_part: str,
+    relationship: dict[str, str],
+    warnings: list[str] | None = None,
+) -> str:
+    target = relationship.get("target", "")
+    if not target:
+        return ""
+    if relationship.get("target_mode", "").lower() == "external":
+        if warnings is not None:
+            warnings.append(f"Rejected external OOXML relationship target from {base_part}: {target}")
+        return ""
+    part = resolve_part_path(base_part, target)
+    if not part and warnings is not None:
+        warnings.append(f"Rejected unsafe relationship target from {base_part}: {target}")
+    return part
 
 
 def collect_text(element: ET.Element | None, include_deleted: bool = True) -> str:
@@ -80,6 +115,10 @@ def collect_text(element: ET.Element | None, include_deleted: bool = True) -> st
             parts.append(node.text)
         elif include_deleted and name == "delText" and node.text:
             parts.append(node.text)
+        elif name == "tab":
+            parts.append("\t")
+        elif name in {"br", "cr"}:
+            parts.append("\n")
     return "".join(parts).strip()
 
 
@@ -88,8 +127,13 @@ def collect_plain_text(element: ET.Element | None) -> str:
         return ""
     parts: list[str] = []
     for node in element.iter():
-        if local_name(node.tag) in {"t", "delText"} and node.text:
+        name = local_name(node.tag)
+        if name in {"t", "delText"} and node.text:
             parts.append(node.text)
+        elif name == "tab":
+            parts.append("\t")
+        elif name in {"br", "cr"}:
+            parts.append("\n")
     return "".join(parts).strip()
 
 
@@ -123,6 +167,10 @@ def paragraph_text_with_revisions(paragraph: ET.Element) -> tuple[str, list[dict
             parts.append(node.text)
         elif name == "delText" and node.text and mode == "delete":
             parts.append(node.text)
+        elif name == "tab":
+            parts.append("\t")
+        elif name in {"br", "cr"}:
+            parts.append("\n")
         for child in list(node):
             walk(child, mode, meta)
 
@@ -149,13 +197,16 @@ def markdown_table(rows: list[list[str]]) -> str:
     body = padded[1:]
 
     def line(row: Iterable[str]) -> str:
-        return "| " + " | ".join(str(cell).replace("\n", " ").strip() for cell in row) + " |"
+        def escape_cell(cell: str) -> str:
+            return str(cell).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ").strip()
+
+        return "| " + " | ".join(escape_cell(cell) for cell in row) + " |"
 
     return "\n".join([line(header), line(separator), *[line(row) for row in body]])
 
 
-def core_properties(package: zipfile.ZipFile) -> dict[str, str]:
-    root = read_xml(package, "docProps/core.xml")
+def core_properties(package: zipfile.ZipFile, warnings: list[str] | None = None) -> dict[str, str]:
+    root = read_optional_xml(package, "docProps/core.xml", warnings)
     if root is None:
         return {}
     fields = {
@@ -176,8 +227,19 @@ def core_properties(package: zipfile.ZipFile) -> dict[str, str]:
     return metadata
 
 
+def atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(text, encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 def write_json(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
 
 
 def md_heading(text: str, level: int = 1) -> str:
@@ -194,6 +256,34 @@ def media_members(package: zipfile.ZipFile, prefix: str) -> list[str]:
     return sorted(name for name in package.namelist() if name.startswith(prefix))
 
 
+def select_artifact_output_dir(source: Path, out_dir: Path, document_type: str) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    full_path = out_dir / f"{source.stem}.full.md"
+    manifest_path = out_dir / f"{source.stem}.manifest.json"
+    report_path = out_dir / f"{source.stem}.report.md"
+    if not full_path.exists() and not manifest_path.exists() and not report_path.exists():
+        return out_dir
+    if manifest_path.exists():
+        try:
+            prior = json.loads(manifest_path.read_text(encoding="utf-8"))
+            prior_source = Path(prior.get("source", {}).get("path", "")).resolve()
+            prior_artifacts = prior.get("artifacts", {})
+            prior_full_path = Path(prior_artifacts.get("full_markdown", "")).resolve()
+            prior_manifest_path = Path(prior_artifacts.get("manifest", "")).resolve()
+            if (
+                prior_source == source.resolve()
+                and prior.get("document_type") == document_type
+                and prior_full_path == full_path.resolve()
+                and prior_manifest_path == manifest_path.resolve()
+            ):
+                return out_dir
+        except Exception:
+            pass
+    run_dir = out_dir / f"office-reader-run-{uuid.uuid4().hex}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
 def default_manifest(source: Path, document_type: str, normalized_file: Path | None = None) -> dict[str, Any]:
     normalized_file = normalized_file or source
     return {
@@ -207,6 +297,7 @@ def default_manifest(source: Path, document_type: str, normalized_file: Path | N
         "comments": [],
         "revisions": [],
         "notes": [],
+        "warnings": [],
         "visual_findings": [],
         "artifacts": {},
     }

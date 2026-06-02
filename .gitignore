@@ -9,6 +9,9 @@ __pycache__/
 *.log
 preview/
 page_images/
+smoke-output/
+derived/
+legacy-worker-*
 *.manifest.local.json
 *.report.local.md
 *.full.local.md
