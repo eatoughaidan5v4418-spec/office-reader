@@ -73,6 +73,56 @@ def make_docx(path):
     write_zip(path, files)
 
 
+def make_docx_with_supplemental_parts(path):
+    files = {
+        "word/document.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:p><w:r><w:t>Body ok</w:t></w:r></w:p>
+    <w:p><w:r><w:footnoteReference w:id="2"/></w:r><w:r><w:endnoteReference w:id="3"/></w:r></w:p>
+    <w:sectPr>
+      <w:headerReference w:type="default" r:id="rIdHeader1"/>
+      <w:footerReference w:type="default" r:id="rIdFooter1"/>
+    </w:sectPr>
+  </w:body>
+</w:document>""",
+        "word/_rels/document.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdHeader1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+  <Relationship Id="rIdFooter1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>
+</Relationships>""",
+        "word/header1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+       xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:p>
+    <w:r><w:t>CONFIDENTIAL HEADER</w:t></w:r>
+    <w:r><w:drawing><a:blip r:embed="rIdHeaderImage"/></w:drawing></w:r>
+  </w:p>
+</w:hdr>""",
+        "word/_rels/header1.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdHeaderImage" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/header.png"/>
+</Relationships>""",
+        "word/footer1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p><w:r><w:t>v2 footer</w:t></w:r></w:p>
+</w:ftr>""",
+        "word/footnotes.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:footnote w:id="-1"><w:p><w:r><w:t>separator</w:t></w:r></w:p></w:footnote>
+  <w:footnote w:id="2"><w:p><w:r><w:t>Footnote evidence</w:t></w:r></w:p></w:footnote>
+</w:footnotes>""",
+        "word/endnotes.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:endnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:endnote w:id="3"><w:p><w:r><w:t>Endnote source</w:t></w:r></w:p></w:endnote>
+</w:endnotes>""",
+        "word/media/header.png": b"fake image bytes",
+    }
+    write_zip(path, files)
+
+
 def make_pptx(path):
     files = {
         "ppt/presentation.xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -236,6 +286,36 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(table_media["row_index"], 2)
             self.assertEqual(table_media["cell_index"], 2)
             self.assertTrue(manifest["visual_findings"][0]["requires_visual_review"])
+
+    def test_docx_reader_extracts_headers_footers_footnotes_and_endnotes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "supplemental.docx"
+            out_dir = tmp_path / "out"
+            make_docx_with_supplemental_parts(source)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+
+            full_md = (out_dir / "supplemental.full.md").read_text(encoding="utf-8")
+            manifest = json.loads((out_dir / "supplemental.manifest.json").read_text(encoding="utf-8"))
+            self.assertIn("Body ok", full_md)
+            self.assertIn("CONFIDENTIAL HEADER", full_md)
+            self.assertIn("v2 footer", full_md)
+            self.assertIn("Footnote evidence", full_md)
+            self.assertIn("Endnote source", full_md)
+
+            by_text = {item["text"]: item for item in manifest["structure"]}
+            self.assertEqual(by_text["CONFIDENTIAL HEADER"]["part_type"], "header")
+            self.assertEqual(by_text["CONFIDENTIAL HEADER"]["part"], "word/header1.xml")
+            self.assertEqual(by_text["v2 footer"]["part_type"], "footer")
+            self.assertEqual(by_text["Footnote evidence"]["part_type"], "footnote")
+            self.assertEqual(by_text["Endnote source"]["part_type"], "endnote")
+
+            relationships = manifest["visual_findings"][0]["relationships"]
+            header_media = next(item for item in relationships if item["relationship_id"] == "rIdHeaderImage")
+            self.assertEqual(header_media["target"], "word/media/header.png")
+            self.assertEqual(header_media["part_type"], "header")
+            self.assertEqual(header_media["part"], "word/header1.xml")
 
     def test_pptx_reader_extracts_slides_notes_comments_and_tables(self):
         with tempfile.TemporaryDirectory() as tmp:

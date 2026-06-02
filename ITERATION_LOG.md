@@ -1,5 +1,45 @@
 # Office Reader Iteration Log
 
+## 2026-06-02 - DOCX supplemental part extraction
+
+### Problems Found
+
+- `read_docx.py` only processed `word/document.xml` body children.
+- Header, footer, footnote, and endnote text could be silently omitted from Markdown and manifest output.
+- Media relationships inside header/footer parts were not location-aware.
+
+### Changes Completed
+
+- Added DOCX supplemental part discovery for:
+  - headers referenced from `word/_rels/document.xml.rels`
+  - footers referenced from `word/_rels/document.xml.rels`
+  - `word/footnotes.xml`
+  - `word/endnotes.xml`
+- Added shared part processing for Word paragraphs, tables, comments, revisions, and drawing media references.
+- Added `part_type` and `part` location metadata to Word structure entries, tables, revisions, comments, and media relationship hints.
+- Added a synthetic DOCX regression fixture covering header text, footer text, footnote text, endnote text, and a header image relationship.
+- Updated `SKILL.md` and `references/output_schema.md`.
+
+### Verification
+
+- Focused tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_docx_reader_outputs_markdown_and_manifest tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_headers_footers_footnotes_and_endnotes -v`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 24 tests
+
+### Remaining Risks
+
+- Block-level content controls (`w:sdt`) are still not fully unpacked as first-class containers.
+- Textboxes and shape-originated text can still be flattened or missed, especially outside the main document body.
+- Comment range anchors and move revisions are not yet modeled.
+
+### Next Round Direction
+
+- Add DOCX block-level content control extraction and then textbox-origin metadata.
+
 ## 2026-06-02 - LibreOffice temp profile cleanup
 
 ### Problems Found

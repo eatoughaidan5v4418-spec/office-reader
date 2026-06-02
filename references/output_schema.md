@@ -12,10 +12,10 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `document_type`: `docx` or `pptx`.
 - `reading_mode`: `fast`, `balanced`, or `complete`.
 - `metadata`: package metadata from `docProps/core.xml` when present.
-- `structure`: paragraphs/headings for Word or ordered slides for PowerPoint.
-- `tables`: extracted table rows with document or slide location.
-- `comments`: Word comments or PowerPoint comments. Word comments referenced inside a table cell may include `table_index`, `row_index`, and `cell_index`.
-- `revisions`: Word tracked insertions and deletions. Word revisions inside a table cell may include `table_index`, `row_index`, and `cell_index`.
+- `structure`: paragraphs/headings for Word or ordered slides for PowerPoint. Word entries may include `part_type` and `part` for non-body sources such as headers, footers, footnotes, and endnotes.
+- `tables`: extracted table rows with document, slide, or Word part location.
+- `comments`: Word comments or PowerPoint comments. Word comments referenced inside a table cell may include `table_index`, `row_index`, `cell_index`, `part_type`, and `part`.
+- `revisions`: Word tracked insertions and deletions. Word revisions inside a table cell may include `table_index`, `row_index`, `cell_index`, `part_type`, and `part`.
 - `notes`: PowerPoint speaker notes.
 - `visual_analysis`: visual pipeline status, selected mode, rendered page count, analyzed item count, cache hits, backends, and messages.
 - `visual_findings`: flags for media, drawings, image-heavy content, OCR text, rendered-page observations, vision summaries, diagram summaries, confidence, backend, duration, and cache status.
@@ -41,7 +41,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `duration_ms`: elapsed time for this item.
 - `cache_hit`: whether this result came from `.office-reader-cache`.
 
-For DOCX media relationships found inside a table cell, entries under `visual_findings[].relationships` may include `table_index`, `row_index`, and `cell_index`.
+For DOCX media relationships found in the body, a non-body Word part, or a table cell, entries under `visual_findings[].relationships` may include `part_type`, `part`, `table_index`, `row_index`, and `cell_index`.
 
 For PPTX slides, entries under `visual_findings[].objects` may include a structured visual object inventory:
 

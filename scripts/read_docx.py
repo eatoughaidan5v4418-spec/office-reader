@@ -25,6 +25,7 @@ from common_ooxml import (
     qn,
     read_relationships,
     read_xml,
+    resolve_part_path,
     table_to_rows,
     write_json,
 )
@@ -73,6 +74,52 @@ def table_cell_location(table_index: int, row_index: int, cell_index: int) -> di
     return {"table_index": table_index, "row_index": row_index, "cell_index": cell_index}
 
 
+def part_relationships_member(part_path: str) -> str:
+    part = Path(part_path)
+    return f"{part.parent.as_posix()}/_rels/{part.name}.rels"
+
+
+def resolved_relationship_target(part_path: str, rels: dict[str, dict[str, str]], rel_id: str | None) -> str:
+    rel = rels.get(rel_id or "")
+    target = rel.get("target", "") if rel else ""
+    return resolve_part_path(part_path, target) if target else ""
+
+
+def block_children(container) -> list[Any]:
+    if container is None:
+        return []
+    if container.tag in {
+        qn("w", "body"),
+        qn("w", "hdr"),
+        qn("w", "ftr"),
+        qn("w", "footnote"),
+        qn("w", "endnote"),
+    }:
+        return list(container)
+    body = container.find("w:body", NS)
+    return list(body) if body is not None else list(container)
+
+
+def related_parts(package: zipfile.ZipFile, source_part: str, rels: dict[str, dict[str, str]], part_type: str) -> list[tuple[str, str, str]]:
+    matches: list[tuple[str, str, str]] = []
+    needle = f"/{part_type}"
+    for rel_id, rel in rels.items():
+        if needle not in rel.get("type", "") or not rel.get("target"):
+            continue
+        part = resolve_part_path(source_part, rel["target"])
+        if part in package.namelist():
+            matches.append((part_type, part, rel_id))
+    return matches
+
+
+def fixed_note_parts(package: zipfile.ZipFile) -> list[tuple[str, str, str]]:
+    parts = []
+    for part_type, part in (("footnote", "word/footnotes.xml"), ("endnote", "word/endnotes.xml")):
+        if part in package.namelist():
+            parts.append((part_type, part, ""))
+    return parts
+
+
 def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
     manifest = default_manifest(source, "docx")
     markdown: list[str] = []
@@ -93,68 +140,98 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
         table_index = 0
         media_refs: list[dict[str, str]] = []
 
-        for child in list(body):
-            tag = child.tag
-            if tag == qn("w", "p"):
-                text, revisions = paragraph_text_with_revisions(child)
-                if not text and not list(child.iter(qn("w", "drawing"))):
-                    continue
-                paragraph_index += 1
-                level = heading_level(child)
-                refs = extract_comment_refs(child)
-                item = {
-                    "type": "heading" if level else "paragraph",
-                    "index": paragraph_index,
-                    "level": level,
-                    "text": text,
-                    "comment_ids": refs,
-                }
-                manifest["structure"].append(item)
-                for revision in revisions:
-                    revision["paragraph_index"] = paragraph_index
-                    manifest["revisions"].append(revision)
+        def process_part(part_type: str, part_path: str, container, part_rels: dict[str, dict[str, str]], label: str = "") -> None:
+            nonlocal paragraph_index, table_index
+            added_part_heading = False
+            for child in block_children(container):
+                tag = child.tag
+                if tag == qn("w", "p"):
+                    text, revisions = paragraph_text_with_revisions(child)
+                    if not text and not list(child.iter(qn("w", "drawing"))):
+                        continue
+                    if part_type != "document" and not added_part_heading:
+                        markdown.append(md_heading(label or part_type.title(), 2))
+                        added_part_heading = True
+                    paragraph_index += 1
+                    level = heading_level(child) if part_type == "document" else None
+                    refs = extract_comment_refs(child)
+                    item = {
+                        "type": "heading" if level else "paragraph",
+                        "index": paragraph_index,
+                        "level": level,
+                        "text": text,
+                        "comment_ids": refs,
+                        "part_type": part_type,
+                        "part": part_path,
+                    }
+                    manifest["structure"].append(item)
+                    for revision in revisions:
+                        revision.update({"paragraph_index": paragraph_index, "part_type": part_type, "part": part_path})
+                        manifest["revisions"].append(revision)
 
-                if level:
-                    markdown.append(md_heading(text, level))
-                elif text:
-                    markdown.append(text)
-                for ref_id in refs:
-                    comment = comments_by_id.get(ref_id)
-                    if comment:
-                        markdown.append(f"> Comment {ref_id}: {comment['text']}")
+                    if level:
+                        markdown.append(md_heading(text, level))
+                    elif text:
+                        markdown.append(text)
+                    for ref_id in refs:
+                        comment = comments_by_id.get(ref_id)
+                        if comment:
+                            comment.update({"part_type": part_type, "part": part_path, "paragraph_index": paragraph_index})
+                            markdown.append(f"> Comment {ref_id}: {comment['text']}")
 
-                for blip in child.iter(qn("a", "blip")):
-                    rel_id = blip.attrib.get(R_EMBED)
-                    rel = rels.get(rel_id or "")
-                    target = rel.get("target", "") if rel else ""
-                    if target:
-                        media_refs.append({"relationship_id": rel_id or "", "target": target})
+                    for blip in child.iter(qn("a", "blip")):
+                        rel_id = blip.attrib.get(R_EMBED)
+                        target = resolved_relationship_target(part_path, part_rels, rel_id)
+                        if target:
+                            media_refs.append({"relationship_id": rel_id or "", "target": target, "part_type": part_type, "part": part_path})
 
-            elif tag == qn("w", "tbl"):
-                table_index += 1
-                rows = table_to_rows(child, "w:tc", "w:tr")
-                table_entry = {"index": table_index, "rows": rows}
-                manifest["tables"].append(table_entry)
-                markdown.append(f"Table {table_index}")
-                markdown.append(markdown_table(rows))
-                for row_index, row in enumerate(child.findall("w:tr", NS), start=1):
-                    for cell_index, cell in enumerate(row.findall("w:tc", NS), start=1):
-                        location = table_cell_location(table_index, row_index, cell_index)
-                        for paragraph in cell.findall(".//w:p", NS):
-                            _text, revisions = paragraph_text_with_revisions(paragraph)
-                            for revision in revisions:
-                                revision.update(location)
-                                manifest["revisions"].append(revision)
-                            for ref_id in extract_comment_refs(paragraph):
-                                comment = comments_by_id.get(ref_id)
-                                if comment:
-                                    comment.update(location)
-                            for blip in paragraph.iter(qn("a", "blip")):
-                                rel_id = blip.attrib.get(R_EMBED)
-                                rel = rels.get(rel_id or "")
-                                target = rel.get("target", "") if rel else ""
-                                if target:
-                                    media_refs.append({"relationship_id": rel_id or "", "target": target, **location})
+                elif tag == qn("w", "tbl"):
+                    if part_type != "document" and not added_part_heading:
+                        markdown.append(md_heading(label or part_type.title(), 2))
+                        added_part_heading = True
+                    table_index += 1
+                    rows = table_to_rows(child, "w:tc", "w:tr")
+                    table_entry = {"index": table_index, "rows": rows, "part_type": part_type, "part": part_path}
+                    manifest["tables"].append(table_entry)
+                    markdown.append(f"Table {table_index}")
+                    markdown.append(markdown_table(rows))
+                    for row_index, row in enumerate(child.findall("w:tr", NS), start=1):
+                        for cell_index, cell in enumerate(row.findall("w:tc", NS), start=1):
+                            location = {**table_cell_location(table_index, row_index, cell_index), "part_type": part_type, "part": part_path}
+                            for paragraph in cell.findall(".//w:p", NS):
+                                _text, revisions = paragraph_text_with_revisions(paragraph)
+                                for revision in revisions:
+                                    revision.update(location)
+                                    manifest["revisions"].append(revision)
+                                for ref_id in extract_comment_refs(paragraph):
+                                    comment = comments_by_id.get(ref_id)
+                                    if comment:
+                                        comment.update(location)
+                                for blip in paragraph.iter(qn("a", "blip")):
+                                    rel_id = blip.attrib.get(R_EMBED)
+                                    target = resolved_relationship_target(part_path, part_rels, rel_id)
+                                    if target:
+                                        media_refs.append({"relationship_id": rel_id or "", "target": target, **location})
+
+        process_part("document", "word/document.xml", body, rels)
+
+        supplemental_parts = []
+        supplemental_parts.extend(related_parts(package, "word/document.xml", rels, "header"))
+        supplemental_parts.extend(related_parts(package, "word/document.xml", rels, "footer"))
+        supplemental_parts.extend(fixed_note_parts(package))
+        for part_type, part_path, rel_id in supplemental_parts:
+            part_root = read_xml(package, part_path)
+            if part_root is None:
+                continue
+            part_rels = read_relationships(package, part_relationships_member(part_path))
+            if part_type in {"footnote", "endnote"}:
+                for note in part_root.findall(f"w:{part_type}", NS):
+                    note_id = note.attrib.get(W_ID, "")
+                    if note_id in {"-1", "0"}:
+                        continue
+                    process_part(part_type, part_path, note, part_rels, f"{part_type.title()} {note_id}".strip())
+            else:
+                process_part(part_type, part_path, part_root, part_rels, f"{part_type.title()} {rel_id}".strip())
 
         package_media = media_members(package, "word/media/")
         if package_media or media_refs:
