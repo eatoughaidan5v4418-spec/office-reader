@@ -9,6 +9,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptPath = $PSCommandPath
+$SkillDir = Split-Path -Parent (Split-Path -Parent $ScriptPath)
+
+function Get-PreviewHealthPath {
+    if (-not [string]::IsNullOrWhiteSpace($env:OFFICE_READER_PREVIEW_HEALTH_PATH)) {
+        return $env:OFFICE_READER_PREVIEW_HEALTH_PATH
+    }
+    return (Join-Path $SkillDir ".office-reader-cache\preview-backend-health.json")
+}
 
 function New-PreviewResult {
     param(
@@ -29,6 +37,61 @@ function Emit-Failure {
     param([string[]]$Messages)
     New-PreviewResult -Status "failed" -Backend "" -Artifacts @() -Messages $Messages | ConvertTo-Json -Depth 5
     exit 1
+}
+
+function Read-PreviewHealth {
+    $path = Get-PreviewHealthPath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return [pscustomobject]@{ preview = [pscustomobject]@{} }
+    }
+    try {
+        return Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    } catch {
+        return [pscustomobject]@{ preview = [pscustomobject]@{} }
+    }
+}
+
+function Test-OfficeComPreviewUnhealthy {
+    param([string]$Extension)
+    $health = Read-PreviewHealth
+    $preview = $health.preview
+    if (-not $preview) { return $false }
+    $extensionNode = $preview.PSObject.Properties[$Extension]
+    if (-not $extensionNode) { return $false }
+    $backendNode = $extensionNode.Value.PSObject.Properties["office-com"]
+    if (-not $backendNode) { return $false }
+    return ($backendNode.Value.state -eq "unhealthy")
+}
+
+function Write-OfficeComPreviewHealth {
+    param(
+        [string]$Extension,
+        [string]$State,
+        [string]$Reason,
+        [int]$Timeout
+    )
+    $path = Get-PreviewHealthPath
+    $dir = Split-Path -Parent $path
+    if ($dir) {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    }
+    $health = Read-PreviewHealth
+    if (-not $health.preview) {
+        $health | Add-Member -NotePropertyName preview -NotePropertyValue ([pscustomobject]@{}) -Force
+    }
+    if (-not $health.preview.PSObject.Properties[$Extension]) {
+        $health.preview | Add-Member -NotePropertyName $Extension -NotePropertyValue ([pscustomobject]@{}) -Force
+    }
+    $entry = [pscustomobject]@{
+        state = $State
+        reason = $Reason
+        timeout_seconds = $Timeout
+        updated_at = (Get-Date).ToUniversalTime().ToString("o")
+    }
+    $health.preview.$Extension | Add-Member -NotePropertyName "office-com" -NotePropertyValue $entry -Force
+    $json = $health | ConvertTo-Json -Depth 8
+    $utf8NoBom = [Text.UTF8Encoding]::new($false)
+    [IO.File]::WriteAllText($path, $json, $utf8NoBom)
 }
 
 function Resolve-LibreOfficeExecutable {
@@ -132,11 +195,15 @@ $messages = @()
 $skipInlineCom = $false
 
 if (-not $ComWorker) {
+    if (Test-OfficeComPreviewUnhealthy -Extension $ext) {
+        $messages += "Skipping Office COM preview because backend health memory marks it unhealthy for $ext; trying fallback preview backends first."
+        $skipInlineCom = $true
+    }
     $hasOfficeCom = (
         ($ext -eq ".docx" -and (Test-Path "Registry::HKEY_CLASSES_ROOT\Word.Application\CLSID")) -or
         ($ext -eq ".pptx" -and (Test-Path "Registry::HKEY_CLASSES_ROOT\PowerPoint.Application\CLSID"))
     )
-    if ($hasOfficeCom) {
+    if ($hasOfficeCom -and -not $skipInlineCom) {
         if ($ContinueAfterComFailure) {
             $skipInlineCom = $true
             $workerJson = Join-Path $outDir ("preview-worker-main-" + [guid]::NewGuid().ToString("N") + ".json")
@@ -157,19 +224,23 @@ if (-not $ComWorker) {
                 Get-CimInstance Win32_Process -Filter "Name='WINWORD.EXE' OR Name='POWERPNT.EXE'" |
                     Where-Object { $_.CommandLine -match "/Automation|-Embedding" } |
                     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+                Write-OfficeComPreviewHealth -Extension $ext -State "unhealthy" -Reason "timeout" -Timeout $TimeoutSeconds
                 $messages += "Office COM preview timed out after $TimeoutSeconds seconds; continuing to fallback preview backends."
             } else {
                 $workerText = if (Test-Path -LiteralPath $workerJson) { Get-Content -LiteralPath $workerJson -Raw } else { "" }
                 try {
                     $workerResult = $workerText | ConvertFrom-Json
                     if ($workerResult.status -eq "success") {
+                        Write-OfficeComPreviewHealth -Extension $ext -State "healthy" -Reason "success" -Timeout $TimeoutSeconds
                         $workerResult | ConvertTo-Json -Depth 5
                         exit 0
                     }
+                    Write-OfficeComPreviewHealth -Extension $ext -State "unhealthy" -Reason "failure" -Timeout $TimeoutSeconds
                     foreach ($message in @($workerResult.messages)) {
                         if ($message) { $messages += "Office COM preview failed before fallback: $message" }
                     }
                 } catch {
+                    Write-OfficeComPreviewHealth -Extension $ext -State "unhealthy" -Reason "non_json" -Timeout $TimeoutSeconds
                     $messages += "Office COM preview worker returned non-JSON output; continuing to fallback preview backends."
                 }
             }
@@ -192,6 +263,7 @@ if (-not $skipInlineCom) {
                 $word.Quit()
             }
             if (Test-Path -LiteralPath $pdfPath) {
+                Write-OfficeComPreviewHealth -Extension $ext -State "healthy" -Reason "success" -Timeout $TimeoutSeconds
                 New-PreviewResult -Status "success" -Backend "office-com" -Artifacts @($pdfPath) -Messages @("Exported DOCX preview PDF with Word COM.") | ConvertTo-Json -Depth 5
                 exit 0
             }
@@ -212,6 +284,7 @@ if (-not $skipInlineCom) {
                 $powerPoint.Quit()
             }
             if (Test-Path -LiteralPath $pdfPath) {
+                Write-OfficeComPreviewHealth -Extension $ext -State "healthy" -Reason "success" -Timeout $TimeoutSeconds
                 New-PreviewResult -Status "success" -Backend "office-com" -Artifacts @($pdfPath) -Messages @("Exported PPTX preview PDF with PowerPoint COM.") | ConvertTo-Json -Depth 5
                 exit 0
             }
@@ -229,7 +302,7 @@ if ($soffice) {
         New-Item -ItemType Directory -Force -Path $profile | Out-Null
         & $soffice --headless "-env:UserInstallation=file:///$($profile.Replace('\','/'))" --convert-to pdf --outdir $outDir $sourcePath | Out-Null
         if (Test-Path -LiteralPath $pdfPath) {
-            New-PreviewResult -Status "success" -Backend "libreoffice" -Artifacts @($pdfPath) -Messages @("Exported preview PDF with LibreOffice.") | ConvertTo-Json -Depth 5
+            New-PreviewResult -Status "success" -Backend "libreoffice" -Artifacts @($pdfPath) -Messages @($messages + "Exported preview PDF with LibreOffice.") | ConvertTo-Json -Depth 5
             exit 0
         }
     } catch {

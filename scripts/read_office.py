@@ -49,7 +49,7 @@ def convert_legacy(source: Path, out_dir: Path) -> dict:
             "messages": [proc.stderr.strip() or proc.stdout.strip() or "Legacy conversion failed without JSON output."],
         }
     if proc.returncode != 0:
-        raise RuntimeError(json.dumps(result, ensure_ascii=False, indent=2))
+        raise RuntimeError(json.dumps(result, ensure_ascii=True, indent=2))
     return result
 
 
@@ -101,7 +101,7 @@ def bootstrap_deps(include_system_tools: bool = False) -> dict:
             "messages": [proc.stderr.strip() or proc.stdout.strip() or "Dependency bootstrap failed without JSON output."],
         }
     if proc.returncode != 0:
-        raise RuntimeError(json.dumps(result, ensure_ascii=False, indent=2))
+        raise RuntimeError(json.dumps(result, ensure_ascii=True, indent=2))
     return result
 
 
@@ -200,7 +200,7 @@ def main() -> int:
         "manifest": str(manifest_path),
         "report": str(report_path),
     }
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0
 
 

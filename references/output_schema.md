@@ -2,6 +2,8 @@
 
 `office-reader` writes a manifest JSON file beside the Markdown transcript and report.
 
+The unified `scripts/read_office.py` command also prints a small JSON object to stdout with `full_markdown`, `manifest`, and `report` paths. That stdout JSON is ASCII escaped so callers can decode it as UTF-8 across Windows consoles even when paths contain Chinese characters or spaces.
+
 ## Top-Level Fields
 
 - `source`: original file path and name.
@@ -39,3 +41,7 @@
 - `cache_hit`: whether this result came from `.office-reader-cache`.
 
 If these fields are empty, the report must list the visual gap instead of claiming the image content was fully read.
+
+## Visual Analysis Messages
+
+`visual_analysis.messages` carries dependency and backend diagnostics that should be surfaced in reports. Preview backend health decisions, such as skipping unhealthy Word or PowerPoint COM preview and falling back to LibreOffice, are recorded here.

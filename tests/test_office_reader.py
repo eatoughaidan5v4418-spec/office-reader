@@ -227,6 +227,36 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertIn("# Structured Reading Report: board-memo.docx", report)
             self.assertIn("- Comments: 1", report)
 
+    def test_unified_reader_stdout_json_is_utf8_safe_for_chinese_paths(self):
+        with tempfile.TemporaryDirectory(prefix="office-reader-") as tmp:
+            tmp_path = Path(tmp) / "\u4e2d\u6587 path smoke"
+            tmp_path.mkdir()
+            source = tmp_path / "\u4e2d\u6587 \u6837\u672c.docx"
+            out_dir = tmp_path / "\u8f93\u51fa docx"
+            make_docx(source)
+
+            script = SCRIPTS_DIR / "read_office.py"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    str(source),
+                    "--out-dir",
+                    str(out_dir),
+                    "--mode",
+                    "fast",
+                    "--no-openai-vision",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr.decode(errors="replace"))
+            stdout = proc.stdout.decode("utf-8")
+            data = json.loads(stdout)
+            self.assertTrue(Path(data["manifest"]).exists())
+            self.assertTrue(Path(data["report"]).exists())
+
     def test_unified_reader_accepts_modes_and_enriches_visual_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -477,6 +507,133 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(data["backend"], "libreoffice")
             self.assertIn("messages", data)
             self.assertTrue((out_dir / "board-memo.pdf").exists())
+
+    def test_render_preview_skips_unhealthy_com_backend_from_health_memory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "board-memo.docx"
+            out_dir = tmp_path / "preview"
+            health_path = tmp_path / "backend-health.json"
+            fake_soffice = tmp_path / "soffice.cmd"
+            make_docx(source)
+            health_path.write_text(
+                json.dumps(
+                    {
+                        "preview": {
+                            ".docx": {
+                                "office-com": {
+                                    "state": "unhealthy",
+                                    "reason": "timeout",
+                                    "timeout_seconds": 1,
+                                    "updated_at": "2026-06-02T00:00:00Z",
+                                }
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            fake_soffice.write_text(
+                "@echo off\r\n"
+                "set OUTDIR=\r\n"
+                ":args\r\n"
+                "if \"%~1\"==\"\" goto doneargs\r\n"
+                "if \"%~1\"==\"--outdir\" (\r\n"
+                "  set OUTDIR=%~2\r\n"
+                "  shift\r\n"
+                ")\r\n"
+                "shift\r\n"
+                "goto args\r\n"
+                ":doneargs\r\n"
+                "if not defined OUTDIR exit /b 2\r\n"
+                "echo fake pdf> \"%OUTDIR%\\board-memo.pdf\"\r\n"
+                "exit /b 0\r\n",
+                encoding="utf-8",
+            )
+            script = SCRIPTS_DIR / "render_preview.ps1"
+            env = os.environ.copy()
+            env["SOFFICE_PATH"] = str(fake_soffice)
+            env["OFFICE_READER_PREVIEW_HEALTH_PATH"] = str(health_path)
+
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script),
+                    "-InputPath",
+                    str(source),
+                    "-OutputDir",
+                    str(out_dir),
+                    "-TimeoutSeconds",
+                    "5",
+                    "-ContinueAfterComFailure",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["backend"], "libreoffice")
+            messages = " ".join(data["messages"])
+            self.assertIn("Skipping Office COM preview", messages)
+            self.assertNotIn("timed out after 5 seconds", messages)
+
+    def test_render_preview_timeout_records_unhealthy_com_backend(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "board-memo.docx"
+            out_dir = tmp_path / "preview"
+            health_path = tmp_path / "backend-health.json"
+            make_docx(source)
+            script = SCRIPTS_DIR / "render_preview.ps1"
+            env = os.environ.copy()
+            env["OFFICE_READER_PREVIEW_HEALTH_PATH"] = str(health_path)
+
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script),
+                    "-InputPath",
+                    str(source),
+                    "-OutputDir",
+                    str(out_dir),
+                    "-TimeoutSeconds",
+                    "1",
+                    "-ContinueAfterComFailure",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+                env=env,
+            )
+            self.assertIn(proc.returncode, {0, 1}, proc.stderr)
+            data = json.loads(proc.stdout)
+            messages = " ".join(data.get("messages", []))
+            if "Office COM preview timed out" not in messages:
+                self.skipTest("Office COM preview did not time out on this machine.")
+            health = json.loads(health_path.read_text(encoding="utf-8"))
+            entry = health["preview"][".docx"]["office-com"]
+            self.assertEqual(entry["state"], "unhealthy")
+            self.assertEqual(entry["reason"], "timeout")
+            self.assertEqual(entry["timeout_seconds"], 1)
 
 
 if __name__ == "__main__":

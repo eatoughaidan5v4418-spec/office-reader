@@ -67,6 +67,14 @@ For `.pptx`, extract presentation metadata, slide order, slide text, tables, spe
 
 XML extraction does not fully read text inside images, screenshots, rasterized charts, SmartArt, or complex embedded objects. In `balanced` or `complete` mode, the visual pipeline renders pages/slides when possible, applies local OCR, optionally asks OpenAI vision for diagram/chart/screenshot interpretation, caches results, and writes findings back into `visual_findings`.
 
+## Preview Backend Health Memory
+
+Preview rendering remembers unhealthy Microsoft Office COM behavior separately from legacy conversion. If Word or PowerPoint COM preview times out or returns invalid output, `scripts/render_preview.ps1` records that backend as unhealthy for the normalized extension and later preview rendering skips directly to fallback backends such as LibreOffice.
+
+This does not change `.doc` or `.ppt` legacy conversion priority: Microsoft Office COM remains first, followed by optional WPS and LibreOffice.
+
+The default preview health file is `.office-reader-cache/preview-backend-health.json` under the skill directory. Set `OFFICE_READER_PREVIEW_HEALTH_PATH` only for tests or when you need an isolated cache.
+
 ## Quick Commands
 
 ```powershell
