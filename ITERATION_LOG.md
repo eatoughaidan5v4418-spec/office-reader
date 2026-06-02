@@ -1,5 +1,41 @@
 # Office Reader Iteration Log
 
+## 2026-06-02 - DOCX move revision extraction
+
+### Problems Found
+
+- `w:moveFrom` and `w:moveTo` were not modeled as revisions.
+- Moved text could be flattened into paragraph text without making the review action clear.
+
+### Changes Completed
+
+- Added `move_from` and `move_to` revision extraction in `paragraph_text_with_revisions()`.
+- Added explicit Markdown markers:
+  - `{~moved from: text~}`
+  - `{~moved to: text~}`
+- Added a synthetic DOCX regression fixture for moved-from and moved-to text.
+- Updated `SKILL.md` and `references/output_schema.md`.
+
+### Verification
+
+- Focused tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_move_revisions tests.test_office_reader.OfficeReaderTests.test_docx_reader_outputs_markdown_and_manifest -v`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 28 tests
+
+### Remaining Risks
+
+- DOCX drawing geometry/alt text for images is still less detailed than PPTX visual object inventory.
+- Formatting-only revisions are not yet modeled.
+- COM worker stdout/stderr temp files are still retained in some paths.
+
+### Next Round Direction
+
+- Add DOCX drawing/image metadata inventory or clean COM worker stdout/stderr files.
+
 ## 2026-06-02 - DOCX comment range anchors
 
 ### Problems Found

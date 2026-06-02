@@ -223,6 +223,23 @@ def make_docx_with_comment_range(path):
     write_zip(path, files)
 
 
+def make_docx_with_move_revisions(path):
+    files = {
+        "word/document.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Sequence </w:t></w:r>
+      <w:moveFrom w:author="Editor" w:date="2026-05-02T00:00:00Z"><w:r><w:t>old clause</w:t></w:r></w:moveFrom>
+      <w:r><w:t> then </w:t></w:r>
+      <w:moveTo w:author="Editor" w:date="2026-05-02T00:00:00Z"><w:r><w:t>new clause</w:t></w:r></w:moveTo>
+    </w:p>
+  </w:body>
+</w:document>""",
+    }
+    write_zip(path, files)
+
+
 def make_pptx(path):
     files = {
         "ppt/presentation.xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -498,6 +515,26 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(comment["text"], "Add source citation.")
             self.assertEqual(comment["anchor_text"], "ARR source")
             self.assertEqual(comment["paragraph_index"], 1)
+
+    def test_docx_reader_extracts_move_revisions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "move-revisions.docx"
+            out_dir = tmp_path / "out"
+            make_docx_with_move_revisions(source)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+
+            full_md = (out_dir / "move-revisions.full.md").read_text(encoding="utf-8")
+            manifest = json.loads((out_dir / "move-revisions.manifest.json").read_text(encoding="utf-8"))
+            self.assertIn("{~moved from: old clause~}", full_md)
+            self.assertIn("{~moved to: new clause~}", full_md)
+            move_from = next(item for item in manifest["revisions"] if item["type"] == "move_from")
+            move_to = next(item for item in manifest["revisions"] if item["type"] == "move_to")
+            self.assertEqual(move_from["text"], "old clause")
+            self.assertEqual(move_to["text"], "new clause")
+            self.assertEqual(move_from["paragraph_index"], 1)
+            self.assertEqual(move_to["paragraph_index"], 1)
 
     def test_pptx_reader_extracts_slides_notes_comments_and_tables(self):
         with tempfile.TemporaryDirectory() as tmp:

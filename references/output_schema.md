@@ -26,6 +26,8 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 
 - Insertions are rendered as `{+inserted text+}`.
 - Deletions are rendered as `{-deleted text-}`.
+- Moved-from text is rendered as `{~moved from: text~}`.
+- Moved-to text is rendered as `{~moved to: text~}`.
 
 ## Visual Review Flag
 

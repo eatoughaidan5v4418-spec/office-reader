@@ -124,6 +124,18 @@ def paragraph_text_with_revisions(paragraph: ET.Element, skip_subtree_names: set
                 revisions.append({"type": "deletion", "text": chunk, **next_meta})
                 parts.append("{-" + chunk + "-}")
             return
+        if name in {"moveFrom", "moveTo"}:
+            revision_type = "move_from" if name == "moveFrom" else "move_to"
+            next_meta = {
+                "author": node.attrib.get(W_AUTHOR, ""),
+                "date": node.attrib.get(W_DATE, ""),
+            }
+            chunk = collect_text(node, include_deleted=True)
+            if chunk:
+                revisions.append({"type": revision_type, "text": chunk, **next_meta})
+                label = "moved from" if revision_type == "move_from" else "moved to"
+                parts.append("{~" + label + ": " + chunk + "~}")
+            return
         if name == "t" and node.text:
             parts.append(node.text)
         elif name == "delText" and node.text and mode == "delete":
