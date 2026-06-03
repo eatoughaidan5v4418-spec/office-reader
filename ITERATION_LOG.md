@@ -1,5 +1,62 @@
 # Office Reader Iteration Log
 
+## 2026-06-03 - Fast embedded media OCR option
+
+### Problems Found
+
+- Fast mode extracted embedded images and EMF previews but did not OCR them.
+- Query mode could search OCR fields, but fast-mode image text remained invisible unless full page rendering/OCR was used.
+- `media_summary.json` and the report did not have a place to expose text recovered from individual embedded media files.
+
+### Changes Completed
+
+- Added `visual_analysis.py --media-ocr off|selected|all`.
+- Added `read_office.py --media-ocr off|selected|all` forwarding through the unified entrypoint.
+- `selected` OCRs a bounded set of extracted image-like media items/EMF previews; `all` attempts every image-like extracted media item.
+- Media OCR writes `ocr_text` and `ocr_backend` to `embedded_media[]` and `media_summary.json`.
+- Added `source_type: embedded_media_ocr` visual findings so query mode can find media OCR text.
+- Reports now show `Media OCR` lines under Embedded Media.
+- Updated `SKILL.md`, `README.md`, and `references/output_schema.md`.
+
+### Verification
+
+- TDD red test:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_visual_analysis_fast_media_ocr_adds_text_to_embedded_media -v`
+  - Initial result: failed because `visual_analysis.py` did not recognize `--media-ocr`.
+- Focused test after implementation:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_visual_analysis_fast_media_ocr_adds_text_to_embedded_media -v`
+  - Result: `OK`
+- Syntax check:
+  - `python -m py_compile scripts\visual_analysis.py scripts\read_office.py scripts\assemble_report.py tests\test_office_reader.py`
+  - Result: `OK`
+- Focused regression pair:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_visual_analysis_fast_media_ocr_adds_text_to_embedded_media tests.test_office_reader.OfficeReaderTests.test_unified_reader_query_writes_matches_to_manifest_report_and_stdout -v`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 38 tests
+- Real PowerPoint media OCR smoke:
+  - Source: `C:\Users\Huang\Documents\标题幻灯片选项 1.pptx`
+  - Command: `read_office.py ... --mode fast --media-ocr selected --query "标题" --no-openai-vision`
+  - Output: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\media-ocr-round-20260603-title-pptx-v2`
+  - Result: success
+  - Visual analysis status: `partial`
+  - Embedded media: `29`
+  - Media OCR count: `6`
+  - Query matches: `4`
+  - Report includes `Media OCR via tesseract` / `Media OCR via rapidocr` lines.
+
+### Remaining Risks
+
+- OCR quality depends on RapidOCR/Tesseract availability and image quality.
+- `selected` uses a bounded item count to keep fast mode fast; use `all` for exhaustive embedded-media OCR.
+- Media OCR does not interpret diagrams semantically unless OCR text is enough; OpenAI vision or complete mode is still needed for complex chart/diagram meaning.
+
+### Next Round Direction
+
+- Add stronger DOCX image object inventory metadata, especially alt text, shape names, dimensions, and OLE-style object hints.
+
 ## 2026-06-03 - Unified reader query lookup artifact
 
 ### Problems Found

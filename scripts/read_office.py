@@ -422,6 +422,7 @@ def run_visual_analysis(
     mode: str,
     enable_openai_vision: bool,
     timeout_seconds: int,
+    media_ocr: str,
 ) -> Path:
     command = [
         sys.executable,
@@ -435,6 +436,8 @@ def run_visual_analysis(
         mode,
         "--timeout-seconds",
         str(timeout_seconds),
+        "--media-ocr",
+        media_ocr,
     ]
     if not enable_openai_vision:
         command.append("--no-openai-vision")
@@ -468,6 +471,7 @@ def main() -> int:
     parser.add_argument("--visual-timeout-seconds", type=int, default=90)
     parser.add_argument("--query", default=None, help="Write a query-results artifact for a quick text lookup.")
     parser.add_argument("--query-limit", type=int, default=20, help="Maximum query matches to include in the artifact.")
+    parser.add_argument("--media-ocr", choices=["off", "selected", "all"], default="off")
     args = parser.parse_args()
 
     source = args.source.resolve()
@@ -537,6 +541,7 @@ def main() -> int:
             mode=args.mode,
             enable_openai_vision=not args.no_openai_vision,
             timeout_seconds=args.visual_timeout_seconds,
+            media_ocr=args.media_ocr,
         )
         if args.query:
             query_path = apply_query(manifest_path, args.query, args.query_limit)

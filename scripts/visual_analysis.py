@@ -310,6 +310,8 @@ def build_media_summary(embedded_media: list[dict[str, Any]], out_dir: Path) -> 
                 "content_type": item.get("content_type", ""),
                 "sha256": item.get("sha256", ""),
                 "label": first_media_label(item),
+                "ocr_text": item.get("ocr_text", ""),
+                "ocr_backend": item.get("ocr_backend", ""),
                 "contexts": item.get("contexts", []),
             }
             for item in embedded_media
@@ -496,6 +498,9 @@ def rapidocr_text(image_path: Path) -> tuple[str, str]:
 
 
 def local_ocr(image_path: Path, messages: list[str]) -> tuple[str, str]:
+    fake_text = os.environ.get("OFFICE_READER_FAKE_OCR_TEXT")
+    if fake_text is not None:
+        return fake_text, "fake-ocr"
     text, backend = rapidocr_text(image_path)
     if text:
         return text, backend
@@ -615,6 +620,73 @@ def analyze_item(
     result["cache_hit"] = False
     write_json(path, result)
     return result
+
+
+def media_image_path(item: dict[str, Any]) -> Path | None:
+    candidate = Path(str(item.get("preview_path") or item.get("path") or ""))
+    if candidate.exists() and candidate.suffix.lower() in {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}:
+        return candidate
+    return None
+
+
+def media_ocr_limit(mode: str, media_ocr: str) -> int:
+    if media_ocr == "off":
+        return 0
+    if media_ocr == "all":
+        return 10_000
+    if mode == "fast":
+        return int(os.environ.get("OFFICE_READER_FAST_MEDIA_OCR_LIMIT", "6"))
+    return int(os.environ.get("OFFICE_READER_MEDIA_OCR_LIMIT", "12"))
+
+
+def apply_media_ocr(
+    embedded_media: list[dict[str, Any]],
+    visual: list[dict[str, Any]],
+    analysis: dict[str, Any],
+    messages: list[str],
+    media_ocr: str,
+    mode: str,
+) -> None:
+    limit = media_ocr_limit(mode, media_ocr)
+    if limit <= 0:
+        return
+    count = 0
+    for item in embedded_media:
+        if count >= limit:
+            break
+        image_path = media_image_path(item)
+        if not image_path:
+            continue
+        ocr_text, backend = local_ocr(image_path, messages)
+        if not ocr_text:
+            continue
+        item["ocr_text"] = ocr_text
+        item["ocr_backend"] = backend
+        visual.append(
+            {
+                "source_type": "embedded_media_ocr",
+                "requires_visual_review": True,
+                "reason": "embedded media OCR",
+                "image_path": str(image_path),
+                "ocr_text": ocr_text,
+                "backend": backend,
+                "confidence": "medium",
+                "cache_hit": False,
+                "duration_ms": 0,
+                "media_member": item.get("member", ""),
+                "media_label": first_media_label(item),
+            }
+        )
+        count += 1
+    analysis["media_ocr_count"] = count
+    if count:
+        analysis["analyzed_item_count"] = int(analysis.get("analyzed_item_count", 0)) + count
+        analysis["backends"] = sorted(
+            {
+                *[backend for backend in [item.get("ocr_backend", "") for item in embedded_media] if backend],
+                *[backend for backend in analysis.get("backends", []) if backend],
+            }
+        )
 
 
 def page_index_from_image(path: Path) -> int:
@@ -749,6 +821,7 @@ def enrich_manifest(
     mode: str,
     enable_openai: bool,
     timeout_seconds: int,
+    media_ocr: str = "off",
 ) -> dict[str, Any]:
     manifest = read_json(manifest_path)
     manifest["reading_mode"] = mode
@@ -766,6 +839,7 @@ def enrich_manifest(
         "analyzed_item_count": 0,
         "cache_hits": 0,
         "embedded_media_count": 0,
+        "media_ocr_count": 0,
         "messages": messages,
         "backends": [],
     }
@@ -775,6 +849,7 @@ def enrich_manifest(
     if embedded_media:
         attach_media_contexts(manifest, embedded_media)
         attach_media_labels(embedded_media)
+        apply_media_ocr(embedded_media, visual, analysis, messages, media_ocr, mode)
         summary_path = build_media_summary(embedded_media, out_dir)
         contact_sheet = build_contact_sheet(embedded_media, out_dir, messages)
         manifest.setdefault("artifacts", {})["embedded_media_dir"] = str(out_dir / "embedded_media")
@@ -789,7 +864,7 @@ def enrich_manifest(
         for item in visual:
             item["backend"] = item.get("backend") or ("ooxml-media" if item.get("requires_visual_review") else "ooxml")
             item["vision_summary"] = item.get("vision_summary") or item.get("reason", "")
-        analysis["status"] = "skipped"
+        analysis["status"] = "partial" if analysis.get("media_ocr_count") else "skipped"
         manifest["visual_analysis"] = analysis
         manifest["completeness_score"] = compute_completeness_score(manifest)
         write_json(manifest_path, manifest)
@@ -878,6 +953,7 @@ def main() -> int:
     parser.add_argument("--mode", choices=["fast", "balanced", "complete"], default="balanced")
     parser.add_argument("--no-openai-vision", action="store_true")
     parser.add_argument("--timeout-seconds", type=int, default=90)
+    parser.add_argument("--media-ocr", choices=["off", "selected", "all"], default="off")
     args = parser.parse_args()
 
     try:
@@ -888,6 +964,7 @@ def main() -> int:
             args.mode,
             enable_openai=not args.no_openai_vision,
             timeout_seconds=args.timeout_seconds,
+            media_ocr=args.media_ocr,
         )
     except Exception as exc:
         print(f"Visual analysis failed: {exc}", file=sys.stderr)

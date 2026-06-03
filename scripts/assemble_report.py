@@ -199,6 +199,9 @@ def build_report(manifest: dict[str, Any]) -> str:
                 label = label or first.get("caption") or first.get("alt_text") or first.get("title") or first.get("name") or first.get("nearest_heading") or ""
             label_text = f", label={first_sentence(label, 120)}" if label else ""
             lines.append(f"- {item.get('member')}: {item.get('content_type')} {cache}{label_text}, path={item.get('path')}{preview}")
+            if item.get("ocr_text"):
+                backend = f" via {item.get('ocr_backend')}" if item.get("ocr_backend") else ""
+                lines.append(f"  Media OCR{backend}: {first_sentence(item.get('ocr_text'), 320)}")
     else:
         lines.append("- No embedded media files were extracted.")
     if manifest.get("artifacts", {}).get("media_contact_sheet"):

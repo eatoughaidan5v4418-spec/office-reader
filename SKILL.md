@@ -29,6 +29,8 @@ Use this skill to turn Word and PowerPoint files into a full Markdown transcript
 
 Use `--query "<text>"` with any mode to write a focused `<basename>.query.json` lookup artifact and add a Query Results section to the report. The lookup scans extracted structure text, tables, comments, comment anchors, revisions, speaker notes, OCR/vision text, media relationship context, and embedded-media labels. It is an extracted-text lookup, not proof that unverified image-only content was read.
 
+Use `--media-ocr selected` to OCR selected extracted embedded images/EMF previews without rendering every page. Use `--media-ocr all` when every extracted image-like media item should be attempted. Media OCR writes `ocr_text`/`ocr_backend` to `embedded_media[]`, `media_summary.json`, and the report, and adds `embedded_media_ocr` visual findings that query mode can search.
+
 Use `--no-openai-vision` when cloud visual analysis is not allowed. Without `OPENAI_API_KEY`, local OCR still runs when available and the report clearly lists remaining visual gaps.
 
 ## Dependency Bootstrap
@@ -89,6 +91,7 @@ The default preview health file is `.office-reader-cache/preview-backend-health.
 ```powershell
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode balanced
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode fast --query "experiment eight"
+python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode fast --media-ocr selected --query "sensor"
 python scripts\read_office.py C:\path\file.pptx --out-dir C:\path\out --mode complete
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode balanced --no-openai-vision
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\bootstrap_deps.ps1 -DryRun -IncludeSystemTools

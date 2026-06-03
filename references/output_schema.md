@@ -75,13 +75,14 @@ DOCX table captions are matched from the same cell, same row, or nearest precedi
 - `label`: best available short label derived from caption, alt text, title, object name, nearest heading, or package member.
 - `preview_path` and `preview_format`: optional cached PNG preview for EMF files when conversion succeeds.
 - `contexts`: optional relationship/object context copied from `visual_findings`, such as caption, nearest heading, table cell, slide, alt text, or DOCX `media_source`.
+- `ocr_text` and `ocr_backend`: optional fields populated when `--media-ocr selected` or `--media-ocr all` recovers text from the extracted image or EMF preview.
 
 When image-like media can be opened or previewed, the visual pipeline also writes:
 
-- `media_summary.json`: compact list of media items with paths, preview paths, labels, hashes, and contexts.
+- `media_summary.json`: compact list of media items with paths, preview paths, labels, hashes, OCR text/backend when present, and contexts.
 - `media_contact_sheet.jpg`: tiled thumbnail sheet for quick human inspection.
 
-These files are triage aids. They do not prove OCR or semantic understanding unless corresponding `ocr_text`, OpenAI `vision_summary`, or `diagram_summary` fields are present in `visual_findings`.
+These files are triage aids. They do not prove OCR or semantic understanding unless corresponding `ocr_text`, OpenAI `vision_summary`, or `diagram_summary` fields are present in `visual_findings`. Media OCR adds `source_type: embedded_media_ocr` entries to `visual_findings[]` and increments `visual_analysis.media_ocr_count`.
 
 For PPTX slides, entries under `visual_findings[].objects` may include a structured visual object inventory:
 

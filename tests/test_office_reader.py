@@ -588,6 +588,54 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertIn("Media summary:", report)
             self.assertIn("word/media/board.png", report)
 
+    def test_visual_analysis_fast_media_ocr_adds_text_to_embedded_media(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "captioned.docx"
+            out_dir = tmp_path / "out"
+            make_docx_with_captioned_media(source)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+            manifest_path = out_dir / "captioned.manifest.json"
+            script = SCRIPTS_DIR / "visual_analysis.py"
+            env = os.environ.copy()
+            env["OFFICE_READER_FAKE_OCR_TEXT"] = "SENSOR BOARD OCR TEXT"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    str(manifest_path),
+                    "--normalized-file",
+                    str(source),
+                    "--out-dir",
+                    str(out_dir),
+                    "--mode",
+                    "fast",
+                    "--media-ocr",
+                    "selected",
+                    "--no-openai-vision",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.run_script("assemble_report.py", manifest_path)
+
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            media = manifest["embedded_media"][0]
+            self.assertEqual(media["ocr_text"], "SENSOR BOARD OCR TEXT")
+            self.assertEqual(media["ocr_backend"], "fake-ocr")
+            self.assertEqual(manifest["visual_analysis"]["media_ocr_count"], 1)
+            self.assertEqual(manifest["visual_analysis"]["status"], "partial")
+            self.assertTrue(any(item.get("source_type") == "embedded_media_ocr" for item in manifest["visual_findings"]))
+            media_summary = json.loads(Path(manifest["artifacts"]["media_summary"]).read_text(encoding="utf-8"))
+            self.assertEqual(media_summary["items"][0]["ocr_text"], "SENSOR BOARD OCR TEXT")
+            report = (out_dir / "captioned.report.md").read_text(encoding="utf-8")
+            self.assertIn("Media OCR via fake-ocr: SENSOR BOARD OCR TEXT", report)
+
     def test_docx_reader_extracts_headers_footers_footnotes_and_endnotes(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

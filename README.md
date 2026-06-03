@@ -23,6 +23,7 @@ python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode bal
 python scripts\read_office.py C:\path\file.pptx --out-dir C:\path\out --mode complete --no-openai-vision
 python scripts\read_office.py C:\path\legacy.doc --out-dir C:\path\out --mode fast
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode fast --query "ARR source"
+python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode fast --media-ocr selected --query "sensor"
 ```
 
 `read_office.py` configures stdout/stderr as UTF-8 and prints a small JSON object with generated paths. Automation should decode stdout as UTF-8; PowerShell 5 users should read manifest/report files with `-Encoding UTF8`.
@@ -30,6 +31,8 @@ python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode fas
 Use `--mode fast` for simple lookup tasks such as finding a section, question, or keyword. For legacy `.doc` and `.ppt`, fast mode uses a text-only fallback first. If full legacy conversion fails in `balanced` or `complete`, the unified reader also falls back to searchable text artifacts and marks `conversion.status` as `text_fallback`.
 
 Use `--query "<text>"` with any mode to generate `<basename>.query.json`, add `manifest.query`, include `query_results` in stdout, and add a Query Results section to the report. Query mode searches extracted structure text, tables, comments, comment anchors, revisions, speaker notes, OCR/vision text fields, media context, and embedded-media labels.
+
+Use `--media-ocr selected` to OCR selected extracted embedded images or EMF previews without rendering full pages. Use `--media-ocr all` to attempt every image-like extracted media item. Media OCR results are written to `embedded_media[].ocr_text`, `media_summary.json`, `visual_findings[]`, and the report, so `--query` can find text recovered from embedded images.
 
 ## Dependencies
 
