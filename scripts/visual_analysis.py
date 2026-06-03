@@ -282,12 +282,20 @@ def attach_media_contexts(manifest: dict[str, Any], embedded_media: list[dict[st
 
 
 def first_media_label(item: dict[str, Any]) -> str:
+    label = str(item.get("label", "")).strip()
+    if label:
+        return label
     for context in item.get("contexts", []) or []:
         for key in ("caption", "alt_text", "title", "name", "nearest_heading"):
             value = str(context.get(key, "")).strip()
             if value:
                 return value
     return str(item.get("member", "media"))
+
+
+def attach_media_labels(embedded_media: list[dict[str, Any]]) -> None:
+    for item in embedded_media:
+        item["label"] = first_media_label(item)
 
 
 def build_media_summary(embedded_media: list[dict[str, Any]], out_dir: Path) -> Path:
@@ -766,6 +774,7 @@ def enrich_manifest(
     embedded_media = extract_embedded_media(normalized_file, manifest, out_dir, cache_dir, messages)
     if embedded_media:
         attach_media_contexts(manifest, embedded_media)
+        attach_media_labels(embedded_media)
         summary_path = build_media_summary(embedded_media, out_dir)
         contact_sheet = build_contact_sheet(embedded_media, out_dir, messages)
         manifest.setdefault("artifacts", {})["embedded_media_dir"] = str(out_dir / "embedded_media")

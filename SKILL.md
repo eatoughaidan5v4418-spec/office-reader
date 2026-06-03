@@ -46,7 +46,7 @@ Every successful read produces:
 - `<basename>.full.md`: full Markdown transcript with headings, slide boundaries, tables, comments, revisions, and notes where extractable.
 - `<basename>.manifest.json`: structured extraction data plus `reading_mode`, `visual_analysis`, and `completeness_score`. See `references/output_schema.md`.
 - `<basename>.report.md`: structured reading report with summary, read completeness, outline, tables, comments/revisions, notes, visual findings, risks, and artifacts.
-- `embedded_media/`: extracted packaged images and media when OOXML relationships reference `word/media` or `ppt/media`. EMF files are cached as PNG previews when Windows GDI+ conversion is available.
+- `embedded_media/`: extracted packaged images and media when OOXML relationships reference `word/media` or `ppt/media`. Manifest `embedded_media[]` records include a derived `label` when captions, alt text, object names, or nearby context are available. EMF files are cached as PNG previews when Windows GDI+ conversion is available.
 - `media_contact_sheet.jpg` and `media_summary.json`: lightweight visual index of extracted image-like media, with labels from captions/alt text/nearby context when available.
 
 If legacy conversion fails, return the conversion JSON and explain which backends were unavailable. Do not pretend a `.doc` or `.ppt` was read when no normalized `.docx` or `.pptx` exists.

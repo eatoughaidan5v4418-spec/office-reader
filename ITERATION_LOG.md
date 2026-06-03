@@ -1,5 +1,47 @@
 # Office Reader Iteration Log
 
+## 2026-06-03 - Embedded media manifest labels
+
+### Problems Found
+
+- In the previous three-document smoke, `media_summary.json` had useful derived labels, but `manifest.embedded_media[]` did not expose the same top-level `label`.
+- Downstream scripts that only inspect the manifest had to duplicate label derivation from contexts or incorrectly report zero labeled media.
+
+### Changes Completed
+
+- Added top-level `label` to each `embedded_media[]` record after media contexts are attached.
+- Kept `media_summary.json` labels and contact-sheet labels derived from the same source.
+- Updated the report assembler to prefer `embedded_media[].label` before falling back to context fields.
+- Added a regression assertion that manifest and media-summary labels are present for extracted DOCX media.
+- Updated `SKILL.md` and `references/output_schema.md`.
+
+### Verification
+
+- Syntax check:
+  - `python -m py_compile scripts\visual_analysis.py scripts\assemble_report.py tests\test_office_reader.py`
+  - Result: `OK`
+- Focused test:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_visual_analysis_fast_extracts_embedded_media_and_report_lists_context -v`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 36 tests
+- Real three-document fast slice:
+  - Huang Man: `27` media, `27` manifest labels, `27` summary labels, `0` mismatches, `8` VML/EMF items.
+  - HT32-CC: `6` media, `6` manifest labels, `6` summary labels, `0` mismatches.
+  - Huang Dengke final: `3` media, `3` manifest labels, `3` summary labels, `0` mismatches.
+  - Output root: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\label-round-20260603-105816`.
+
+### Remaining Risks
+
+- Labels are contextual identifiers, not proof that the image content itself was OCR-read or semantically understood.
+- Image/diagram text still requires balanced or complete visual analysis with OCR/vision where appropriate.
+
+### Next Round Direction
+
+- Continue auditing real-document slices for non-invented gaps, especially selected image/OCR behavior or lightweight visual block interpretation.
+
 ## 2026-06-03 - DOCX VML/EMF media relationship context
 
 ### Problems Found

@@ -574,6 +574,7 @@ class OfficeReaderTests(unittest.TestCase):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["visual_analysis"]["embedded_media_count"], 1)
             self.assertEqual(manifest["embedded_media"][0]["member"], "word/media/board.png")
+            self.assertEqual(manifest["embedded_media"][0]["label"], "Figure 3-1 System hardware circuit diagram")
             self.assertTrue(Path(manifest["embedded_media"][0]["path"]).exists())
             self.assertEqual(manifest["embedded_media"][0]["contexts"][0]["caption"], "Figure 3-1 System hardware circuit diagram")
             self.assertTrue(Path(manifest["artifacts"]["media_summary"]).exists())

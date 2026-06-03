@@ -19,7 +19,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `notes`: PowerPoint speaker notes.
 - `visual_analysis`: visual pipeline status, selected mode, rendered page count, analyzed item count, cache hits, backends, and messages.
 - `visual_findings`: flags for media, drawings, image-heavy content, OCR text, rendered-page observations, vision summaries, diagram summaries, confidence, backend, duration, and cache status.
-- `embedded_media`: extracted packaged media records with package member, extracted path, hash, content type, cache status, optional EMF PNG preview path, and optional context records.
+- `embedded_media`: extracted packaged media records with package member, extracted path, hash, content type, cache status, derived label, optional EMF PNG preview path, and optional context records.
 - `completeness_score`: conservative extraction coverage score. It combines text coverage, table coverage, verified visual coverage, OCR coverage, OpenAI vision use, unverified visual count, and score signals.
 - `artifacts`: paths to generated `.full.md`, `.manifest.json`, and report files.
 
@@ -55,6 +55,7 @@ DOCX table captions are matched from the same cell, same row, or nearest precedi
 - `sha256`: package member hash for deduplication and cache identity.
 - `content_type`: file extension-derived type such as `png`, `jpeg`, `emf`, or `mp4`.
 - `cache_hit`: whether the extracted copy already existed.
+- `label`: best available short label derived from caption, alt text, title, object name, nearest heading, or package member.
 - `preview_path` and `preview_format`: optional cached PNG preview for EMF files when conversion succeeds.
 - `contexts`: optional relationship/object context copied from `visual_findings`, such as caption, nearest heading, table cell, slide, alt text, or DOCX `media_source`.
 
