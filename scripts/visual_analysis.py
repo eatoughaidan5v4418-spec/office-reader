@@ -242,6 +242,7 @@ def media_context_map(manifest: dict[str, Any]) -> dict[str, list[dict[str, Any]
     contexts: dict[str, list[dict[str, Any]]] = {}
     keep = {
         "relationship_id",
+        "media_source",
         "part_type",
         "part",
         "container",

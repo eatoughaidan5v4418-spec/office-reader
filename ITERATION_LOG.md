@@ -1,5 +1,47 @@
 # Office Reader Iteration Log
 
+## 2026-06-03 - DOCX VML/EMF media relationship context
+
+### Problems Found
+
+- The Huang Man real DOCX contained 8 EMF/Visio-style flowcharts under `word/media`, but they were referenced through VML `v:imagedata` instead of DrawingML `a:blip`.
+- The DOCX reader only scanned DrawingML image relationships, so those VML images could be extracted as packaged media but lacked relationship ids, captions, nearby text, and source metadata.
+- `media_summary.json` could not distinguish modern DrawingML images from older VML/OLE-style image previews.
+
+### Changes Completed
+
+- Added DOCX media relationship scanning for both:
+  - DrawingML `a:blip` images as `media_source: drawingml`.
+  - VML `v:imagedata r:id` images as `media_source: vml`.
+- Propagated `media_source` through DOCX relationship contexts and embedded media summaries.
+- Added a synthetic DOCX regression fixture for a VML Visio/EMF image with a nearby figure caption.
+- Updated `SKILL.md` and `references/output_schema.md` to document VML media-source context.
+
+### Verification
+
+- Syntax check:
+  - `python -m py_compile scripts\read_docx.py scripts\visual_analysis.py tests\test_office_reader.py`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 36 tests
+- Real three-document fast slice:
+  - Huang Man: `27` media summary items, `27` labeled, `8` VML/EMF items detected.
+  - HT32-CC: `6` media summary items, `6` labeled.
+  - Huang Dengke final: `3` media summary items, `3` labeled.
+  - Output root: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\vml-round-20260603-105201`.
+
+### Remaining Risks
+
+- VML shape geometry, OLE object metadata, and internal Visio semantics are still not modeled deeply.
+- Fast mode extracts and labels visual media but still does not OCR or semantically understand the image content.
+- Media labels are written to `media_summary.json`; `manifest.embedded_media[]` carries contexts but not a top-level `label` field.
+
+### Next Round Direction
+
+- Add an optional lightweight media OCR/vision block pass for selected extracted images, or add top-level embedded-media labels in the manifest for easier downstream counting.
+
 ## 2026-06-03 - Legacy fast text fallback for simple lookup tasks
 
 ### Problems Found

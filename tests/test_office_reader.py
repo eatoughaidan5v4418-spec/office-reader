@@ -517,6 +517,38 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(by_target["word/media/a.png"]["caption"], "Figure 5-6-1 Normal display test")
             self.assertEqual(by_target["word/media/b.png"]["caption"], "Figure 5-6-2 Normal display test")
 
+    def test_docx_reader_extracts_vml_imagedata_media_relationships(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "vml-media.docx"
+            out_dir = tmp_path / "out"
+            files = {
+                "word/document.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+            xmlns:v="urn:schemas-microsoft-com:vml">
+  <w:body>
+    <w:p><w:r><w:object><v:shape id="_x0000_i1025" type="#_x0000_t75"><v:imagedata r:id="rIdVisio" o:title="" xmlns:o="urn:schemas-microsoft-com:office:office"/></v:shape></w:object></w:r></w:p>
+    <w:p><w:r><w:t>Figure 4-1 Visio flowchart</w:t></w:r></w:p>
+  </w:body>
+</w:document>""",
+                "word/_rels/document.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdVisio" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/visio.emf"/>
+</Relationships>""",
+                "word/media/visio.emf": b"fake-emf",
+            }
+            write_zip(source, files)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+
+            manifest = json.loads((out_dir / "vml-media.manifest.json").read_text(encoding="utf-8"))
+            rel = manifest["visual_findings"][0]["relationships"][0]
+            self.assertEqual(rel["target"], "word/media/visio.emf")
+            self.assertEqual(rel["relationship_id"], "rIdVisio")
+            self.assertEqual(rel["media_source"], "vml")
+            self.assertEqual(rel["caption"], "Figure 4-1 Visio flowchart")
+
     def test_visual_analysis_fast_extracts_embedded_media_and_report_lists_context(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

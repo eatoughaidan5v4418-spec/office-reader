@@ -44,7 +44,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `duration_ms`: elapsed time for this item.
 - `cache_hit`: whether this result came from `.office-reader-cache`.
 
-For DOCX media relationships found in the body, a non-body Word part, a table cell, a block-level content control, or a textbox, entries under `visual_findings[].relationships` may include `part_type`, `part`, `container`, `table_index`, `row_index`, `cell_index`, `paragraph_index`, `paragraph_text`, `nearest_heading`, `nearby_text_before`, `nearby_text_after`, and detected `caption`.
+For DOCX media relationships found in the body, a non-body Word part, a table cell, a block-level content control, or a textbox, entries under `visual_findings[].relationships` may include `part_type`, `part`, `container`, `table_index`, `row_index`, `cell_index`, `paragraph_index`, `paragraph_text`, `nearest_heading`, `nearby_text_before`, `nearby_text_after`, `media_source`, and detected `caption`. `media_source` is usually `drawingml` for `a:blip` images or `vml` for older `v:imagedata`/OLE-style images such as embedded Visio EMF previews.
 
 DOCX table captions are matched from the same cell, same row, or nearest preceding caption row within the same table. This is intended for common Word layout tables where an image paragraph is separate from its figure-caption paragraph.
 
@@ -56,7 +56,7 @@ DOCX table captions are matched from the same cell, same row, or nearest precedi
 - `content_type`: file extension-derived type such as `png`, `jpeg`, `emf`, or `mp4`.
 - `cache_hit`: whether the extracted copy already existed.
 - `preview_path` and `preview_format`: optional cached PNG preview for EMF files when conversion succeeds.
-- `contexts`: optional relationship/object context copied from `visual_findings`, such as caption, nearest heading, table cell, slide, or alt text.
+- `contexts`: optional relationship/object context copied from `visual_findings`, such as caption, nearest heading, table cell, slide, alt text, or DOCX `media_source`.
 
 When image-like media can be opened or previewed, the visual pipeline also writes:
 

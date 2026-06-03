@@ -32,6 +32,7 @@ from common_ooxml import (
 
 
 TEXTBOX_SKIP_NAMES = {"txbxContent"}
+VML_IMAGE_REL_ID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
 
 
 def heading_level(paragraph) -> int | None:
@@ -113,6 +114,18 @@ def iter_blips(element, skip_subtree_names: set[str] | None = None):
     for node in iter_without_subtrees(element, skip_subtree_names or set()):
         if node.tag == qn("a", "blip"):
             yield node
+
+
+def iter_media_relationship_ids(element, skip_subtree_names: set[str] | None = None):
+    for node in iter_without_subtrees(element, skip_subtree_names or set()):
+        if node.tag == qn("a", "blip"):
+            rel_id = node.attrib.get(R_EMBED)
+            if rel_id:
+                yield rel_id, "drawingml"
+        elif local_name(node.tag) == "imagedata":
+            rel_id = node.attrib.get(VML_IMAGE_REL_ID)
+            if rel_id:
+                yield rel_id, "vml"
 
 
 def table_cell_location(table_index: int, row_index: int, cell_index: int) -> dict[str, int]:
@@ -323,7 +336,8 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                 tag = child.tag
                 if tag == qn("w", "p"):
                     text, revisions = paragraph_text_with_revisions(child, skip_subtree_names=skip_names)
-                    if not text and not list(child.iter(qn("w", "drawing"))):
+                    media_relationships = list(iter_media_relationship_ids(child, skip_subtree_names=skip_names))
+                    if not text and not media_relationships:
                         pass
                     else:
                         ensure_part_heading()
@@ -357,13 +371,13 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                                     comment["anchor_text"] = anchors[ref_id]
                                 markdown.append(f"> Comment {ref_id}: {comment['text']}")
 
-                        for blip in iter_blips(child, skip_subtree_names=skip_names):
-                            rel_id = blip.attrib.get(R_EMBED)
+                        for rel_id, media_source in media_relationships:
                             target = resolved_relationship_target(part_path, part_rels, rel_id)
                             if target:
                                 media_refs.append(
                                     {
-                                        "relationship_id": rel_id or "",
+                                        "relationship_id": rel_id,
+                                        "media_source": media_source,
                                         "target": target,
                                         "paragraph_index": paragraph_index,
                                         "paragraph_text": text,
@@ -398,13 +412,13 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                                         comment.update(location)
                                         if anchors.get(ref_id):
                                             comment["anchor_text"] = anchors[ref_id]
-                                for blip in iter_blips(paragraph, skip_subtree_names=TEXTBOX_SKIP_NAMES):
-                                    rel_id = blip.attrib.get(R_EMBED)
+                                for rel_id, media_source in iter_media_relationship_ids(paragraph, skip_subtree_names=TEXTBOX_SKIP_NAMES):
                                     target = resolved_relationship_target(part_path, part_rels, rel_id)
                                     if target:
                                         media_refs.append(
                                             {
-                                                "relationship_id": rel_id or "",
+                                                "relationship_id": rel_id,
+                                                "media_source": media_source,
                                                 "target": target,
                                                 "paragraph_text": _text,
                                                 **location,
