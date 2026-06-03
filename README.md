@@ -8,11 +8,13 @@ It reads `.doc`, `.docx`, `.ppt`, and `.pptx` into:
 - `<basename>.manifest.json`
 - `<basename>.report.md`
 
-The default path is Microsoft Office COM first for legacy conversion, then optional WPS, then LibreOffice. Preview rendering uses Office COM when healthy and falls back to LibreOffice; slow or invalid COM preview runs are remembered in `.office-reader-cache/preview-backend-health.json`. Visual deep reading combines OOXML extraction, rendered page/slide analysis, local OCR, optional OpenAI vision, and cache reuse.
+The default path is Microsoft Office COM first for legacy conversion, then optional WPS, then LibreOffice. Preview rendering uses Office COM when healthy and falls back to LibreOffice; slow or invalid COM preview runs are remembered in `.office-reader-cache/preview-backend-health.json`. Visual deep reading combines OOXML extraction, embedded media extraction, rendered page/slide analysis, local OCR, optional OpenAI vision, and cache reuse.
 
 Reports include a conservative `completeness_score` so callers can see text/table/visual coverage and remaining unverified visual items. It is a coverage signal, not proof that every visual fact was understood.
 
 For PowerPoint files, the manifest and report include a per-slide visual object inventory for images, charts, SmartArt, OLE objects, video, and audio when those objects are visible in slide relationships. These records are risk/location hints; rendered OCR or OpenAI vision is still required before claiming the visual content itself was understood.
+
+For Word files, media relationships include nearby context when OOXML exposes it: paragraph text, table cell coordinates, nearest heading, adjacent text, and detected figure/table captions. The visual pipeline extracts packaged `word/media` or `ppt/media` files into `embedded_media/`; EMF files get cached PNG previews on Windows when GDI+ conversion succeeds.
 
 ## Quick Start
 
@@ -22,7 +24,7 @@ python scripts\read_office.py C:\path\file.pptx --out-dir C:\path\out --mode com
 python scripts\read_office.py C:\path\legacy.doc --out-dir C:\path\out --mode fast
 ```
 
-`read_office.py` prints ASCII-safe JSON on stdout so automation can parse output paths reliably even when source or output paths contain Chinese characters or spaces.
+`read_office.py` configures stdout/stderr as UTF-8 and prints a small JSON object with generated paths. Automation should decode stdout as UTF-8; PowerShell 5 users should read manifest/report files with `-Encoding UTF8`.
 
 Use `--mode fast` for simple lookup tasks such as finding a section, question, or keyword. For legacy `.doc` and `.ppt`, fast mode uses a text-only fallback first. If full legacy conversion fails in `balanced` or `complete`, the unified reader also falls back to searchable text artifacts and marks `conversion.status` as `text_fallback`.
 

@@ -366,6 +366,68 @@
 
 - Extend PPTX object inventory to SmartArt, OLE, video, and audio with minimal synthetic fixtures.
 
+## 2026-06-03 - Embedded media extraction and DOCX figure context
+
+### Problems Found
+
+- Fast mode could identify that a DOCX contained media, but did not extract packaged images for quick inspection.
+- DOCX image relationships lacked reliable figure context, so callers had to infer image-to-caption mapping from order.
+- Images placed inside one-cell tables often carried their figure caption in the same paragraph, but that caption was not attached to the media relationship.
+- EMF diagrams required a manual conversion step before visual inspection.
+- `read_office.py` UTF-8 stdout improvements initially exposed a Windows child-process decoding issue; sub-script paths could be decoded with replacement characters when the child printed in the local code page.
+
+### Changes Completed
+
+- Added DOCX media relationship context:
+  - `paragraph_index`
+  - `paragraph_text`
+  - `nearest_heading`
+  - `nearby_text_before`
+  - `nearby_text_after`
+  - detected `caption`
+  - table cell and container metadata preserved.
+- Added embedded media extraction in `visual_analysis.py` for OOXML `word/media` and `ppt/media` members referenced by findings.
+- Added cached EMF-to-PNG preview conversion on Windows using GDI+ when possible.
+- Added `embedded_media[]` manifest records and `embedded_media_count` in `visual_analysis`.
+- Updated reports with `Embedded Media` and `Media context` sections.
+- Made `read_office.py` print UTF-8 JSON while decoding child-process output with UTF-8/local-codepage fallback.
+- Added regression tests for:
+  - DOCX image caption/context binding.
+  - table-cell paragraph captions.
+  - fast-mode embedded media extraction and report output.
+- Updated `SKILL.md`, `README.md`, and `references/output_schema.md`.
+
+### Verification
+
+- Focused tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_docx_reader_uses_table_cell_paragraph_caption_for_media tests.test_office_reader.OfficeReaderTests.test_docx_reader_binds_media_to_caption_and_context tests.test_office_reader.OfficeReaderTests.test_visual_analysis_fast_extracts_embedded_media_and_report_lists_context -v`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 34 tests
+- Real document smoke:
+  - Source: `D:\QQ文件\(黄曼)基于STM32多参数水质实时监测系统设计与实现 .docx`
+  - Command: `read_office.py ... --mode fast --no-openai-vision`
+  - Result: success
+  - Time: about `1.28s`
+  - Extracted embedded media: `27`
+  - EMF PNG previews: `8`
+  - Report now includes detected captions such as `图3-1 系统硬件电路原理图`, `图3-2 单片机最小系统框`, and `图5-6-1 正常采集与OLED显示测试图`.
+
+### Remaining Risks
+
+- Fast mode extracts media and context but still does not OCR or semantically interpret image content.
+- Figure context is heuristic; some Word table layouts split image and caption across separate cells/rows, so not every caption is detected.
+- PowerShell 5 must read generated UTF-8 JSON files with `-Encoding UTF8`; otherwise the shell may misdecode Chinese text.
+- EMF conversion depends on Windows GDI+ and can fail for unusual vector content.
+
+### Next Round Direction
+
+- Add a lightweight contact-sheet generator and optional media-summary JSON so simple image-content checks can be faster and less manual.
+- Improve cross-row/cross-cell caption matching for DOCX figures stored in layout tables.
+- Add PPTX embedded media extraction context parity where slide object inventory already knows slide/object metadata.
+
 ## 2026-06-02 - Output no-clobber and preview reuse
 
 ### Problems Found

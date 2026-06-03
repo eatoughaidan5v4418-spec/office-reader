@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import locale
 import json
 import os
 import subprocess
@@ -14,14 +15,40 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
+def configure_utf8_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    proc = subprocess.run(
         command,
-        text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
     )
+    stdout = decode_process_bytes(proc.stdout)
+    stderr = decode_process_bytes(proc.stderr)
+    return subprocess.CompletedProcess(proc.args, proc.returncode, stdout, stderr)
+
+
+def decode_process_bytes(data: bytes | str | None) -> str:
+    if data is None:
+        return ""
+    if isinstance(data, str):
+        return data
+    encodings = ["utf-8", locale.getpreferredencoding(False), "mbcs", "gbk"]
+    for encoding in encodings:
+        if not encoding:
+            continue
+        try:
+            return data.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return data.decode("utf-8", errors="replace")
 
 
 def conversion_script_path() -> Path:
@@ -60,7 +87,7 @@ def convert_legacy(source: Path, out_dir: Path) -> dict:
             "messages": [proc.stderr.strip() or proc.stdout.strip() or "Legacy conversion failed without JSON output."],
         }
     if proc.returncode != 0:
-        raise RuntimeError(json.dumps(result, ensure_ascii=True, indent=2))
+        raise RuntimeError(json.dumps(result, ensure_ascii=False, indent=2))
     return result
 
 
@@ -103,7 +130,7 @@ def extract_legacy_text(source: Path, out_dir: Path) -> dict:
             "messages": [proc.stderr.strip() or proc.stdout.strip() or "Legacy text extraction failed without JSON output."],
         }
     if proc.returncode != 0 or result.get("status") != "success":
-        raise RuntimeError(json.dumps(result, ensure_ascii=True, indent=2))
+        raise RuntimeError(json.dumps(result, ensure_ascii=False, indent=2))
     return result
 
 
@@ -248,7 +275,7 @@ def bootstrap_deps(include_system_tools: bool = False) -> dict:
             "messages": [proc.stderr.strip() or proc.stdout.strip() or "Dependency bootstrap failed without JSON output."],
         }
     if proc.returncode != 0:
-        raise RuntimeError(json.dumps(result, ensure_ascii=True, indent=2))
+        raise RuntimeError(json.dumps(result, ensure_ascii=False, indent=2))
     return result
 
 
@@ -294,6 +321,7 @@ def update_conversion(manifest_path: Path, source: Path, conversion: dict | None
 
 
 def main() -> int:
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(description="Read .doc/.docx/.ppt/.pptx into office-reader artifacts.")
     parser.add_argument("source", type=Path)
     parser.add_argument("--out-dir", type=Path, default=None)
@@ -328,7 +356,7 @@ def main() -> int:
                     "manifest": str(manifest_path),
                     "report": str(report_path),
                 }
-                print(json.dumps(result, ensure_ascii=True, indent=2))
+                print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
             try:
                 conversion = convert_legacy(source, out_dir)
@@ -347,7 +375,7 @@ def main() -> int:
                     "manifest": str(manifest_path),
                     "report": str(report_path),
                 }
-                print(json.dumps(result, ensure_ascii=True, indent=2))
+                print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
         elif ext not in {".docx", ".pptx"}:
             print("office-reader supports only .doc, .docx, .ppt, and .pptx files.", file=sys.stderr)
@@ -373,7 +401,7 @@ def main() -> int:
         "manifest": str(manifest_path),
         "report": str(report_path),
     }
-    print(json.dumps(result, ensure_ascii=True, indent=2))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
 

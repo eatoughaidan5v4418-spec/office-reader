@@ -73,6 +73,28 @@ def make_docx(path):
     write_zip(path, files)
 
 
+def make_docx_with_captioned_media(path):
+    files = {
+        "word/document.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Hardware Design</w:t></w:r></w:p>
+    <w:p><w:r><w:t>The sensor board connects STM32 and OLED.</w:t></w:r></w:p>
+    <w:p><w:r><w:drawing><a:blip xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" r:embed="rIdBoard"/></w:drawing></w:r></w:p>
+    <w:p><w:r><w:t>图3-1 系统硬件电路原理图</w:t></w:r></w:p>
+    <w:p><w:r><w:t>The next paragraph explains the alarm driver.</w:t></w:r></w:p>
+  </w:body>
+</w:document>""",
+        "word/_rels/document.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdBoard" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/board.png"/>
+</Relationships>""",
+        "word/media/board.png": b"\x89PNG\r\n\x1a\nfake",
+    }
+    write_zip(path, files)
+
+
 def make_docx_with_supplemental_parts(path):
     files = {
         "word/document.xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -403,6 +425,86 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(table_media["row_index"], 2)
             self.assertEqual(table_media["cell_index"], 2)
             self.assertTrue(manifest["visual_findings"][0]["requires_visual_review"])
+
+    def test_docx_reader_binds_media_to_caption_and_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "captioned.docx"
+            out_dir = tmp_path / "out"
+            make_docx_with_captioned_media(source)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+
+            manifest = json.loads((out_dir / "captioned.manifest.json").read_text(encoding="utf-8"))
+            rel = manifest["visual_findings"][0]["relationships"][0]
+            self.assertEqual(rel["target"], "word/media/board.png")
+            self.assertEqual(rel["paragraph_index"], 3)
+            self.assertEqual(rel["nearest_heading"], "Hardware Design")
+            self.assertEqual(rel["nearby_text_before"], "The sensor board connects STM32 and OLED.")
+            self.assertEqual(rel["nearby_text_after"], "图3-1 系统硬件电路原理图")
+            self.assertEqual(rel["caption"], "图3-1 系统硬件电路原理图")
+
+    def test_docx_reader_uses_table_cell_paragraph_caption_for_media(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "table-caption.docx"
+            out_dir = tmp_path / "out"
+            files = {
+                "word/document.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:tbl><w:tr><w:tc><w:p>
+      <w:r><w:drawing><a:blip xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" r:embed="rIdChart"/></w:drawing></w:r>
+      <w:r><w:t>图5-1 系统整体仿真电路图</w:t></w:r>
+    </w:p></w:tc></w:tr></w:tbl>
+  </w:body>
+</w:document>""",
+                "word/_rels/document.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdChart" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/chart.png"/>
+</Relationships>""",
+                "word/media/chart.png": b"\x89PNG\r\n\x1a\nfake",
+            }
+            write_zip(source, files)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+
+            manifest = json.loads((out_dir / "table-caption.manifest.json").read_text(encoding="utf-8"))
+            rel = manifest["visual_findings"][0]["relationships"][0]
+            self.assertEqual(rel["caption"], "图5-1 系统整体仿真电路图")
+            self.assertEqual(rel["table_index"], 1)
+
+    def test_visual_analysis_fast_extracts_embedded_media_and_report_lists_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "captioned.docx"
+            out_dir = tmp_path / "out"
+            make_docx_with_captioned_media(source)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+            manifest_path = out_dir / "captioned.manifest.json"
+            self.run_script(
+                "visual_analysis.py",
+                manifest_path,
+                "--normalized-file",
+                source,
+                "--out-dir",
+                out_dir,
+                "--mode",
+                "fast",
+                "--no-openai-vision",
+            )
+            self.run_script("assemble_report.py", manifest_path)
+
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["visual_analysis"]["embedded_media_count"], 1)
+            self.assertEqual(manifest["embedded_media"][0]["member"], "word/media/board.png")
+            self.assertTrue(Path(manifest["embedded_media"][0]["path"]).exists())
+            report = (out_dir / "captioned.report.md").read_text(encoding="utf-8")
+            self.assertIn("Embedded Media", report)
+            self.assertIn("caption=图3-1 系统硬件电路原理图", report)
+            self.assertIn("word/media/board.png", report)
 
     def test_docx_reader_extracts_headers_footers_footnotes_and_endnotes(self):
         with tempfile.TemporaryDirectory() as tmp:

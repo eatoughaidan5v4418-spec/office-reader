@@ -57,6 +57,7 @@ def build_report(manifest: dict[str, Any]) -> str:
     revisions = manifest.get("revisions", [])
     notes = manifest.get("notes", [])
     visual = manifest.get("visual_findings", [])
+    embedded_media = manifest.get("embedded_media", [])
     visual_analysis = manifest.get("visual_analysis", {})
     conversion = manifest.get("conversion", {})
     completeness = manifest.get("completeness_score", {})
@@ -150,10 +151,34 @@ def build_report(manifest: dict[str, Any]) -> str:
             location = f" ({', '.join(location_parts)})" if location_parts else ""
             backend = f", backend: {finding.get('backend')}" if finding.get("backend") else ""
             lines.append(f"- {status}{location}: {finding.get('reason', 'no reason recorded')}{backend}")
+            for rel in finding.get("relationships", [])[:30]:
+                detail = []
+                if rel.get("target"):
+                    detail.append(f"target={rel.get('target')}")
+                if rel.get("caption"):
+                    detail.append(f"caption={first_sentence(rel.get('caption'), 120)}")
+                if rel.get("nearest_heading"):
+                    detail.append(f"section={first_sentence(rel.get('nearest_heading'), 120)}")
+                if rel.get("nearby_text_before"):
+                    detail.append(f"before={first_sentence(rel.get('nearby_text_before'), 120)}")
+                if rel.get("nearby_text_after"):
+                    detail.append(f"after={first_sentence(rel.get('nearby_text_after'), 120)}")
+                if detail:
+                    lines.append(f"  Media context: {'; '.join(detail)}")
             for item in finding.get("objects", [])[:20]:
                 lines.append(f"  Object: {visual_object_summary(item)}")
     else:
         lines.append("- No visual findings recorded.")
+    lines.append("")
+
+    lines.extend(["## Embedded Media", ""])
+    if embedded_media:
+        for item in embedded_media[:80]:
+            preview = f", preview={item.get('preview_path')}" if item.get("preview_path") else ""
+            cache = "cache hit" if item.get("cache_hit") else "extracted"
+            lines.append(f"- {item.get('member')}: {item.get('content_type')} {cache}, path={item.get('path')}{preview}")
+    else:
+        lines.append("- No embedded media files were extracted.")
     lines.append("")
 
     lines.extend(["## Visual Deep Read", ""])

@@ -13,6 +13,7 @@ import site
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -107,9 +108,134 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def package_member_hash(package: zipfile.ZipFile, member: str) -> str:
+    digest = hashlib.sha256()
+    with package.open(member) as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def stable_hash(data: Any) -> str:
     encoded = json.dumps(data, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def unique_media_members(manifest: dict[str, Any]) -> list[str]:
+    members: list[str] = []
+    for finding in manifest.get("visual_findings", []) or []:
+        for media in finding.get("media", []) or []:
+            if isinstance(media, str):
+                members.append(media.replace("\\", "/"))
+        for rel in finding.get("relationships", []) or []:
+            target = str(rel.get("target", "")).replace("\\", "/")
+            if target:
+                members.append(target)
+        for obj in finding.get("objects", []) or []:
+            target = str(obj.get("target", "")).replace("\\", "/")
+            if target:
+                members.append(target)
+    seen: set[str] = set()
+    result: list[str] = []
+    for member in members:
+        if "/media/" not in member:
+            continue
+        key = member.lower()
+        if key not in seen:
+            result.append(member)
+            seen.add(key)
+    return result
+
+
+def media_output_name(member: str, digest: str) -> str:
+    suffix = Path(member).suffix.lower() or ".bin"
+    stem = Path(member).stem
+    return f"{stem}-{digest[:12]}{suffix}"
+
+
+def convert_emf_to_png(source: Path, cache_dir: Path, messages: list[str]) -> Path | None:
+    digest = sha256_file(source)
+    dest = cache_dir / f"{source.stem}-{digest[:12]}.png"
+    if dest.exists():
+        return dest
+    try:
+        from PIL import Image  # type: ignore
+
+        with Image.open(source) as image:
+            image.save(dest)
+        return dest
+    except Exception:
+        pass
+    if os.name != "nt":
+        messages.append(f"EMF conversion skipped for {source.name}: Windows GDI+ is unavailable.")
+        return None
+    source_ps = str(source).replace("'", "''")
+    dest_ps = str(dest).replace("'", "''")
+    script = (
+        "Add-Type -AssemblyName System.Drawing; "
+        f"$mf=New-Object System.Drawing.Imaging.Metafile('{source_ps}'); "
+        "try { "
+        "$w=[Math]::Max(800,[int]($mf.Width*3)); $h=[Math]::Max(500,[int]($mf.Height*3)); "
+        "$bmp=New-Object System.Drawing.Bitmap($w,$h); "
+        "$g=[System.Drawing.Graphics]::FromImage($bmp); $g.Clear([System.Drawing.Color]::White); "
+        "$g.DrawImage($mf,0,0,$w,$h); "
+        f"$bmp.Save('{dest_ps}',[System.Drawing.Imaging.ImageFormat]::Png); "
+        "$g.Dispose(); $bmp.Dispose(); "
+        "} finally { $mf.Dispose() }"
+    )
+    try:
+        proc = run_command(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], timeout=30)
+    except Exception as exc:
+        messages.append(f"EMF conversion failed for {source.name}: {exc}")
+        return None
+    if proc.returncode == 0 and dest.exists():
+        return dest
+    detail = (proc.stderr or proc.stdout or "").strip()
+    messages.append(f"EMF conversion failed for {source.name}: {detail}")
+    return None
+
+
+def extract_embedded_media(
+    normalized_file: Path,
+    manifest: dict[str, Any],
+    out_dir: Path,
+    cache_dir: Path,
+    messages: list[str],
+) -> list[dict[str, Any]]:
+    members = unique_media_members(manifest)
+    if not members or normalized_file.suffix.lower() not in {".docx", ".pptx"}:
+        return []
+    media_dir = out_dir / "embedded_media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    emf_cache = cache_dir / "emf_png"
+    emf_cache.mkdir(parents=True, exist_ok=True)
+    extracted: list[dict[str, Any]] = []
+    with zipfile.ZipFile(normalized_file) as package:
+        names = set(package.namelist())
+        for member in members:
+            if member not in names:
+                messages.append(f"Embedded media member was referenced but not found: {member}")
+                continue
+            digest = package_member_hash(package, member)
+            dest = media_dir / media_output_name(member, digest)
+            cache_hit = dest.exists()
+            if not cache_hit:
+                with package.open(member) as source, dest.open("wb") as target:
+                    shutil.copyfileobj(source, target)
+            item: dict[str, Any] = {
+                "member": member,
+                "path": str(dest),
+                "sha256": digest,
+                "content_type": dest.suffix.lower().lstrip(".") or "binary",
+                "cache_hit": cache_hit,
+            }
+            if dest.suffix.lower() == ".emf":
+                png = convert_emf_to_png(dest, emf_cache, messages)
+                if png:
+                    item["preview_path"] = str(png)
+                    item["preview_format"] = "png"
+            extracted.append(item)
+    return extracted
 
 
 def ensure_visual_fields(finding: dict[str, Any]) -> dict[str, Any]:
@@ -518,9 +644,17 @@ def enrich_manifest(
         "rendered_page_count": 0,
         "analyzed_item_count": 0,
         "cache_hits": 0,
+        "embedded_media_count": 0,
         "messages": messages,
         "backends": [],
     }
+    cache_dir = out_dir / ".office-reader-cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    embedded_media = extract_embedded_media(normalized_file, manifest, out_dir, cache_dir, messages)
+    if embedded_media:
+        manifest.setdefault("artifacts", {})["embedded_media_dir"] = str(out_dir / "embedded_media")
+        manifest["embedded_media"] = embedded_media
+        analysis["embedded_media_count"] = len(embedded_media)
 
     if mode == "fast":
         messages.append("Visual page rendering skipped in fast mode; OOXML media hints were preserved.")
@@ -534,8 +668,6 @@ def enrich_manifest(
         append_visual_markdown(manifest)
         return manifest
 
-    cache_dir = out_dir / ".office-reader-cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
     source_hash = sha256_file(normalized_file)
     page_images: list[Path] = []
     preview_result: dict[str, Any] = {}

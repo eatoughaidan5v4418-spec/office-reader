@@ -130,6 +130,55 @@ def resolved_relationship_target(part_path: str, rels: dict[str, dict[str, str]]
     return resolve_part_path(part_path, target) if target else ""
 
 
+def is_caption_text(text: str) -> bool:
+    return bool(re.match(r"^\s*(图|表|Figure|Fig\.|Table)\s*[\d一二三四五六七八九十IVXivx\-\.]*", text or ""))
+
+
+def nearest_structure_text(structure: list[dict[str, Any]], paragraph_index: int, direction: int) -> str:
+    ordered = sorted(
+        (item for item in structure if item.get("index") and str(item.get("text", "")).strip()),
+        key=lambda item: int(item["index"]),
+    )
+    if direction < 0:
+        candidates = [item for item in ordered if int(item["index"]) < paragraph_index]
+        return str(candidates[-1]["text"]) if candidates else ""
+    candidates = [item for item in ordered if int(item["index"]) > paragraph_index]
+    return str(candidates[0]["text"]) if candidates else ""
+
+
+def nearest_heading_text(structure: list[dict[str, Any]], paragraph_index: int) -> str:
+    headings = [
+        item
+        for item in structure
+        if item.get("type") == "heading" and item.get("index") and int(item["index"]) < paragraph_index
+    ]
+    return str(headings[-1].get("text", "")) if headings else ""
+
+
+def add_media_context(media_refs: list[dict[str, Any]], structure: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    enriched: list[dict[str, Any]] = []
+    by_index = {int(item["index"]): item for item in structure if item.get("index")}
+    for ref in media_refs:
+        item = dict(ref)
+        paragraph_text = str(item.get("paragraph_text", ""))
+        if paragraph_text and is_caption_text(paragraph_text):
+            item.setdefault("caption", paragraph_text)
+        paragraph_index = item.get("paragraph_index")
+        if isinstance(paragraph_index, int):
+            current = str(by_index.get(paragraph_index, {}).get("text", ""))
+            before = nearest_structure_text(structure, paragraph_index, -1)
+            after = nearest_structure_text(structure, paragraph_index, 1)
+            item["nearby_text_before"] = before
+            item["nearby_text_after"] = after
+            item["nearest_heading"] = nearest_heading_text(structure, paragraph_index)
+            for candidate in (current, after, before):
+                if is_caption_text(candidate):
+                    item["caption"] = candidate
+                    break
+        enriched.append(item)
+    return enriched
+
+
 def block_children(container) -> list[Any]:
     if container is None:
         return []
@@ -253,7 +302,15 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                             rel_id = blip.attrib.get(R_EMBED)
                             target = resolved_relationship_target(part_path, part_rels, rel_id)
                             if target:
-                                media_refs.append({"relationship_id": rel_id or "", "target": target, **location})
+                                media_refs.append(
+                                    {
+                                        "relationship_id": rel_id or "",
+                                        "target": target,
+                                        "paragraph_index": paragraph_index,
+                                        "paragraph_text": text,
+                                        **location,
+                                    }
+                                )
                     for textbox_child in textbox_blocks(child):
                         textbox_location = {**(extra_location or {}), "container": "textbox"}
                         process_child(textbox_child, textbox_location)
@@ -286,7 +343,14 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                                     rel_id = blip.attrib.get(R_EMBED)
                                     target = resolved_relationship_target(part_path, part_rels, rel_id)
                                     if target:
-                                        media_refs.append({"relationship_id": rel_id or "", "target": target, **location})
+                                        media_refs.append(
+                                            {
+                                                "relationship_id": rel_id or "",
+                                                "target": target,
+                                                "paragraph_text": _text,
+                                                **location,
+                                            }
+                                        )
                                 for textbox_child in textbox_blocks(paragraph):
                                     textbox_location = {**location, "container": "textbox"}
                                     process_child(textbox_child, textbox_location)
@@ -321,6 +385,7 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                 process_part(part_type, part_path, part_root, part_rels, f"{part_type.title()} {rel_id}".strip())
 
         package_media = media_members(package, "word/media/")
+        media_refs = add_media_context(media_refs, manifest["structure"])
         if package_media or media_refs:
             manifest["visual_findings"].append(
                 {

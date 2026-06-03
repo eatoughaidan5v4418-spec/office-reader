@@ -2,7 +2,7 @@
 
 `office-reader` writes a manifest JSON file beside the Markdown transcript and report.
 
-The unified `scripts/read_office.py` command also prints a small JSON object to stdout with `full_markdown`, `manifest`, and `report` paths. That stdout JSON is ASCII escaped so callers can decode it as UTF-8 across Windows consoles even when paths contain Chinese characters or spaces.
+The unified `scripts/read_office.py` command also prints a small JSON object to stdout with `full_markdown`, `manifest`, and `report` paths. Stdout/stderr are configured as UTF-8 so callers can decode output paths reliably when paths contain Chinese characters or spaces. PowerShell 5 callers should read generated JSON files with `-Encoding UTF8`.
 
 ## Top-Level Fields
 
@@ -19,6 +19,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `notes`: PowerPoint speaker notes.
 - `visual_analysis`: visual pipeline status, selected mode, rendered page count, analyzed item count, cache hits, backends, and messages.
 - `visual_findings`: flags for media, drawings, image-heavy content, OCR text, rendered-page observations, vision summaries, diagram summaries, confidence, backend, duration, and cache status.
+- `embedded_media`: extracted packaged media records with package member, extracted path, hash, content type, cache status, and optional EMF PNG preview path.
 - `completeness_score`: conservative extraction coverage score. It combines text coverage, table coverage, verified visual coverage, OCR coverage, OpenAI vision use, unverified visual count, and score signals.
 - `artifacts`: paths to generated `.full.md`, `.manifest.json`, and report files.
 
@@ -43,7 +44,16 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `duration_ms`: elapsed time for this item.
 - `cache_hit`: whether this result came from `.office-reader-cache`.
 
-For DOCX media relationships found in the body, a non-body Word part, a table cell, a block-level content control, or a textbox, entries under `visual_findings[].relationships` may include `part_type`, `part`, `container`, `table_index`, `row_index`, and `cell_index`.
+For DOCX media relationships found in the body, a non-body Word part, a table cell, a block-level content control, or a textbox, entries under `visual_findings[].relationships` may include `part_type`, `part`, `container`, `table_index`, `row_index`, `cell_index`, `paragraph_index`, `paragraph_text`, `nearest_heading`, `nearby_text_before`, `nearby_text_after`, and detected `caption`.
+
+`embedded_media[]` records are generated when package members under `word/media` or `ppt/media` are referenced. Fields:
+
+- `member`: OOXML package member such as `word/media/image1.emf`.
+- `path`: extracted local copy under `embedded_media/`.
+- `sha256`: package member hash for deduplication and cache identity.
+- `content_type`: file extension-derived type such as `png`, `jpeg`, `emf`, or `mp4`.
+- `cache_hit`: whether the extracted copy already existed.
+- `preview_path` and `preview_format`: optional cached PNG preview for EMF files when conversion succeeds.
 
 For PPTX slides, entries under `visual_findings[].objects` may include a structured visual object inventory:
 
