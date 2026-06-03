@@ -461,6 +461,7 @@ class OfficeReaderTests(unittest.TestCase):
   <w:body>
     <w:tbl><w:tr><w:tc><w:p>
       <w:r><w:drawing><a:blip xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" r:embed="rIdChart"/></w:drawing></w:r>
+    </w:p><w:p>
       <w:r><w:t>Figure 5-1 System simulation circuit diagram</w:t></w:r>
     </w:p></w:tc></w:tr></w:tbl>
   </w:body>
@@ -479,6 +480,42 @@ class OfficeReaderTests(unittest.TestCase):
             rel = manifest["visual_findings"][0]["relationships"][0]
             self.assertEqual(rel["caption"], "Figure 5-1 System simulation circuit diagram")
             self.assertEqual(rel["table_index"], 1)
+
+    def test_docx_reader_matches_multiple_table_figures_by_nearest_caption_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "multi-table-caption.docx"
+            out_dir = tmp_path / "out"
+            files = {
+                "word/document.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:tbl>
+      <w:tr><w:tc><w:p><w:r><w:drawing><a:blip xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" r:embed="rIdA"/></w:drawing></w:r></w:p></w:tc></w:tr>
+      <w:tr><w:tc><w:p><w:r><w:t>Figure 5-6-1 Normal display test</w:t></w:r></w:p></w:tc></w:tr>
+      <w:tr><w:tc><w:p><w:r><w:drawing><a:blip xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" r:embed="rIdB"/></w:drawing></w:r></w:p></w:tc></w:tr>
+      <w:tr><w:tc><w:p><w:r><w:t>Figure 5-6-2 Normal display test</w:t></w:r></w:p></w:tc></w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>""",
+                "word/_rels/document.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdA" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/a.png"/>
+  <Relationship Id="rIdB" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/b.png"/>
+</Relationships>""",
+                "word/media/a.png": VALID_PNG_BYTES,
+                "word/media/b.png": VALID_PNG_BYTES,
+            }
+            write_zip(source, files)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+
+            manifest = json.loads((out_dir / "multi-table-caption.manifest.json").read_text(encoding="utf-8"))
+            relationships = manifest["visual_findings"][0]["relationships"]
+            by_target = {item["target"]: item for item in relationships}
+            self.assertEqual(by_target["word/media/a.png"]["caption"], "Figure 5-6-1 Normal display test")
+            self.assertEqual(by_target["word/media/b.png"]["caption"], "Figure 5-6-2 Normal display test")
 
     def test_visual_analysis_fast_extracts_embedded_media_and_report_lists_context(self):
         with tempfile.TemporaryDirectory() as tmp:

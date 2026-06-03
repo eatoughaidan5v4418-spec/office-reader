@@ -366,6 +366,62 @@
 
 - Extend PPTX object inventory to SmartArt, OLE, video, and audio with minimal synthetic fixtures.
 
+## 2026-06-03 - Three-document slice: DOCX layout-table figure captions
+
+### Problems Found
+
+- User clarified the real slice set should be:
+  - `D:\QQ文件\(黄曼)基于STM32多参数水质实时监测系统设计与实现 .docx`
+  - `C:\Users\Huang\Desktop\CC\第十八届合泰杯复赛报告书_基于HT32的无感式智能体态与脊柱健康监测垫_终稿.docx`
+  - `C:\Users\Huang\Desktop\Proj\发电厂课程设计\03_成果输出\最终提交材料\黄登科-202407124102-定稿材料\黄登科-202407124102-定稿.docx`
+- The earlier user-provided Huang Dengke path missed the final child directory; the actual `.docx` is inside `黄登科-202407124102-定稿材料`.
+- Three-document fast slice found that Huang Man had only `3/27` media items labeled, while HT32-CC and Huang Dengke were fully labeled.
+- Root cause: Word layout tables often store image paragraphs separately from caption paragraphs. `read_docx.py` only used paragraph text or a single unique table caption, so multi-image tables produced missing or wrong labels.
+- The `is_caption_text()` regex had non-ASCII source text that was vulnerable to encoding display/copy damage.
+
+### Changes Completed
+
+- Rewrote caption detection using Unicode escapes for Chinese `图` and `表`.
+- Added table-caption candidate extraction from table rows/cells.
+- Added table-aware media caption matching:
+  - same cell
+  - same row
+  - nearest preceding caption row
+  - single caption fallback
+- Added regression test for multiple figures in one layout table so the second image binds to the second caption instead of the first.
+- Updated `SKILL.md` and `references/output_schema.md`.
+
+### Verification
+
+- Focused tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_docx_reader_matches_multiple_table_figures_by_nearest_caption_row tests.test_office_reader.OfficeReaderTests.test_docx_reader_uses_table_cell_paragraph_caption_for_media tests.test_office_reader.OfficeReaderTests.test_visual_analysis_fast_extracts_embedded_media_and_report_lists_context -v`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 35 tests
+- Real three-document fast slice:
+  - Huang Man: `27` media, labeled count improved from `3` to `19`.
+  - HT32-CC: `6` media, `6` labeled.
+  - Huang Dengke final: `3` media, `3` labeled.
+  - Warm-cache rerun times: Huang Man about `636 ms`, HT32-CC about `460 ms`, Huang Dengke about `500 ms`.
+- Specific Huang Man dual-image table check:
+  - `word/media/image22.jpeg` -> `图5-6-1 正常采集与OLED显示测试图`
+  - `word/media/image23.png` -> `图5-6-2 正常采集与OLED显示测试图`
+  - `word/media/image24.jpeg` -> `图5-7-1 按键修改阈值界面演示图`
+  - `word/media/image25.jpeg` -> `图5-7-2 按键修改阈值界面演示图`
+
+### Remaining Risks
+
+- Huang Man's EMF flowcharts still lack captions because those package members are not exposed through the current `a:blip` relationship scan.
+- Fast mode still does not OCR or semantically interpret image content.
+- Figure matching is heuristic; unusual table layouts can still confuse nearest-caption assignment.
+
+### Next Round Direction
+
+- Inspect EMF/drawing relationships that are present in package media but missing from `visual_findings[].relationships`.
+- Add a narrow media-level OCR path for selected extracted images while keeping fast mode lightweight.
+
 ## 2026-06-03 - Media contact sheet and summary index
 
 ### Problems Found

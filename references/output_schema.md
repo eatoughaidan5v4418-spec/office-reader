@@ -46,6 +46,8 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 
 For DOCX media relationships found in the body, a non-body Word part, a table cell, a block-level content control, or a textbox, entries under `visual_findings[].relationships` may include `part_type`, `part`, `container`, `table_index`, `row_index`, `cell_index`, `paragraph_index`, `paragraph_text`, `nearest_heading`, `nearby_text_before`, `nearby_text_after`, and detected `caption`.
 
+DOCX table captions are matched from the same cell, same row, or nearest preceding caption row within the same table. This is intended for common Word layout tables where an image paragraph is separate from its figure-caption paragraph.
+
 `embedded_media[]` records are generated when package members under `word/media` or `ppt/media` are referenced. Fields:
 
 - `member`: OOXML package member such as `word/media/image1.emf`.

@@ -131,7 +131,62 @@ def resolved_relationship_target(part_path: str, rels: dict[str, dict[str, str]]
 
 
 def is_caption_text(text: str) -> bool:
-    return bool(re.match(r"^\s*(图|表|Figure|Fig\.|Table)\s*[\d一二三四五六七八九十IVXivx\-\.]*", text or ""))
+    return bool(
+        re.match(
+            r"^\s*(?:\u56fe|\u8868|Figure|Fig\.|Table)\s*[\d\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341IVXivx\-\.]*",
+            text or "",
+        )
+    )
+
+
+def table_caption_candidates(tables: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
+    candidates: dict[int, list[dict[str, Any]]] = {}
+    for table in tables:
+        table_index = table.get("index")
+        if not isinstance(table_index, int):
+            continue
+        for row_index, row in enumerate(table.get("rows", []) or [], start=1):
+            for cell_index, cell in enumerate(row or [], start=1):
+                text = str(cell).strip()
+                if is_caption_text(text):
+                    candidates.setdefault(table_index, []).append(
+                        {
+                            "caption": text,
+                            "row_index": row_index,
+                            "cell_index": cell_index,
+                        }
+                    )
+    return candidates
+
+
+def best_table_caption(item: dict[str, Any], captions_by_table: dict[int, list[dict[str, Any]]]) -> str:
+    table_index = item.get("table_index")
+    if not isinstance(table_index, int):
+        return ""
+    candidates = captions_by_table.get(table_index, [])
+    if not candidates:
+        return ""
+    row_index = item.get("row_index")
+    cell_index = item.get("cell_index")
+    same_cell = [
+        candidate
+        for candidate in candidates
+        if candidate.get("row_index") == row_index and candidate.get("cell_index") == cell_index
+    ]
+    same_row = [candidate for candidate in candidates if candidate.get("row_index") == row_index]
+    for group in (same_cell, same_row):
+        if len(group) == 1:
+            return str(group[0]["caption"])
+    if isinstance(row_index, int):
+        before_or_same = [candidate for candidate in candidates if int(candidate.get("row_index", 0)) <= row_index]
+        if before_or_same:
+            nearest = max(before_or_same, key=lambda candidate: int(candidate.get("row_index", 0)))
+            return str(nearest["caption"])
+        nearest = min(candidates, key=lambda candidate: abs(int(candidate.get("row_index", 0)) - row_index))
+        return str(nearest["caption"])
+    if len(candidates) == 1:
+        return str(candidates[0]["caption"])
+    return ""
 
 
 def nearest_structure_text(structure: list[dict[str, Any]], paragraph_index: int, direction: int) -> str:
@@ -155,13 +210,17 @@ def nearest_heading_text(structure: list[dict[str, Any]], paragraph_index: int) 
     return str(headings[-1].get("text", "")) if headings else ""
 
 
-def add_media_context(media_refs: list[dict[str, Any]], structure: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def add_media_context(media_refs: list[dict[str, Any]], structure: list[dict[str, Any]], tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
     enriched: list[dict[str, Any]] = []
     by_index = {int(item["index"]): item for item in structure if item.get("index")}
+    captions_by_table = table_caption_candidates(tables)
     for ref in media_refs:
         item = dict(ref)
+        table_caption = best_table_caption(item, captions_by_table)
+        if table_caption:
+            item["caption"] = table_caption
         paragraph_text = str(item.get("paragraph_text", ""))
-        if paragraph_text and is_caption_text(paragraph_text):
+        if not item.get("caption") and paragraph_text and is_caption_text(paragraph_text):
             item.setdefault("caption", paragraph_text)
         paragraph_index = item.get("paragraph_index")
         if isinstance(paragraph_index, int):
@@ -385,7 +444,7 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                 process_part(part_type, part_path, part_root, part_rels, f"{part_type.title()} {rel_id}".strip())
 
         package_media = media_members(package, "word/media/")
-        media_refs = add_media_context(media_refs, manifest["structure"])
+        media_refs = add_media_context(media_refs, manifest["structure"], manifest["tables"])
         if package_media or media_refs:
             manifest["visual_findings"].append(
                 {
