@@ -318,6 +318,10 @@ def make_pptx(path):
          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
   <p:cm authorId="0" dt="2026-02-01T00:00:00Z"><p:text>Clarify launch date.</p:text></p:cm>
 </p:cmLst>""",
+        "ppt/commentAuthors.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<p:cmAuthorLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cmAuthor id="0" name="Launch Reviewer" initials="LR" lastIdx="1" clrIdx="0"/>
+</p:cmAuthorLst>""",
         "docProps/core.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
                    xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -877,6 +881,9 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(manifest["structure"][0]["title"], "Launch Readiness")
             self.assertEqual(manifest["notes"][0]["text"], "Ask support to confirm staffing.")
             self.assertEqual(manifest["comments"][0]["text"], "Clarify launch date.")
+            self.assertEqual(manifest["comments"][0]["author_id"], "0")
+            self.assertEqual(manifest["comments"][0]["author"], "Launch Reviewer")
+            self.assertEqual(manifest["comments"][0]["initials"], "LR")
             self.assertEqual(manifest["tables"][0]["rows"][1], ["Ops", "At risk"])
             finding = manifest["visual_findings"][0]
             objects = finding["objects"]
@@ -1143,6 +1150,31 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(manifest["artifacts"]["review_items"], str(review_path))
             report = (out_dir / "board-memo.report.md").read_text(encoding="utf-8")
             self.assertIn("- Review items:", report)
+
+    def test_unified_reader_preserves_pptx_comment_author_in_review_items(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "launch-deck.pptx"
+            out_dir = tmp_path / "out"
+            make_pptx(source)
+
+            proc = self.run_script(
+                "read_office.py",
+                source,
+                "--out-dir",
+                out_dir,
+                "--mode",
+                "fast",
+                "--no-openai-vision",
+            )
+
+            stdout = json.loads(proc.stdout)
+            review = json.loads(Path(stdout["review_items"]).read_text(encoding="utf-8"))
+            comment = review["items"][0]
+            self.assertEqual(comment["kind"], "comment")
+            self.assertEqual(comment["author"], "Launch Reviewer")
+            self.assertEqual(comment["initials"], "LR")
+            self.assertEqual(comment["location"]["slide_index"], 1)
 
     def test_unified_reader_evidence_report_forwards_to_report_assembler(self):
         with tempfile.TemporaryDirectory() as tmp:

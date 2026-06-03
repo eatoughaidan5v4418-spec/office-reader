@@ -14,7 +14,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `metadata`: package metadata from `docProps/core.xml` when present.
 - `structure`: paragraphs/headings for Word or ordered slides for PowerPoint. Word entries may include `part_type` and `part` for non-body sources such as headers, footers, footnotes, and endnotes, and `container` values such as `content_control` or `textbox` when text came from those containers.
 - `tables`: extracted table rows with document, slide, or Word part location. DOCX tables may also include `caption`, `headers`, `nearby_text_before`, `nearby_text_after`, and `merged_cells`.
-- `comments`: Word comments or PowerPoint comments. Word comments may include `anchor_text` when `commentRangeStart/commentRangeEnd` identifies the commented span. Word comments referenced inside a table cell may include `table_index`, `row_index`, `cell_index`, `part_type`, and `part`.
+- `comments`: Word comments or PowerPoint comments. Word comments may include `anchor_text` when `commentRangeStart/commentRangeEnd` identifies the commented span. Word comments referenced inside a table cell may include `table_index`, `row_index`, `cell_index`, `part_type`, and `part`. PowerPoint comments may include `author_id`, `author`, and `initials` when `ppt/commentAuthors.xml` is present.
 - `revisions`: Word tracked insertions and deletions. Word revisions inside a table cell may include `table_index`, `row_index`, `cell_index`, `part_type`, and `part`.
 - `notes`: PowerPoint speaker notes.
 - `visual_analysis`: visual pipeline status, selected mode, rendered page count, analyzed item count, cache hits, backends, and messages.
@@ -34,7 +34,7 @@ When comments or tracked revisions are extracted, `read_office.py` writes `<base
 - `document_type`: manifest document type.
 - `total_items`: total comments and revisions exported.
 - `counts`: comment and revision counts.
-- `items`: flat review queue. Comment items include `kind: "comment"`, `comment_id`, `author`, `date`, `text`, `anchor_text`, `location`, and `status: "open"`. Revision items include `kind: "revision"`, `revision_type`, `author`, `date`, `text`, `location`, and `status: "pending"`.
+- `items`: flat review queue. Comment items include `kind: "comment"`, `comment_id`, `author`, `initials`, `date`, `text`, `anchor_text`, `location`, and `status: "open"`. Revision items include `kind: "revision"`, `revision_type`, `author`, `date`, `text`, `location`, and `status: "pending"`.
 
 `location` preserves available source coordinates such as paragraph, slide, table row/cell, Word part, and container.
 

@@ -1,5 +1,54 @@
 # Office Reader Iteration Log
 
+## 2026-06-03 - PPTX comment author metadata
+
+### Problems Found
+
+- PPTX comments preserved slide, part, text, and date but dropped `authorId`.
+- `ppt/commentAuthors.xml` was not parsed, so available PowerPoint commenter names and initials were lost.
+- Review-item exports could include comment authors, but PowerPoint comment initials were not carried through.
+
+### Changes Completed
+
+- Added `ppt/commentAuthors.xml` parsing in `read_pptx.py`.
+- PPTX comments now include `author_id`, `author`, and `initials` when available.
+- PPTX comment extraction now reads `<p:text>` directly for standard comment XML, instead of relying only on DrawingML text collection.
+- Review item comment exports now preserve `initials`.
+- Updated `SKILL.md` and `references/output_schema.md`.
+
+### Verification
+
+- TDD red tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_pptx_reader_extracts_slides_notes_comments_and_tables -v`
+  - Initial result: failed with missing `author_id`.
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_unified_reader_preserves_pptx_comment_author_in_review_items -v`
+  - Initial result: failed with missing review item `initials`.
+- Focused tests after implementation:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_pptx_reader_extracts_slides_notes_comments_and_tables tests.test_office_reader.OfficeReaderTests.test_unified_reader_preserves_pptx_comment_author_in_review_items tests.test_office_reader.OfficeReaderTests.test_unified_reader_writes_review_items_artifact -v`
+  - Result: `OK`
+- Syntax check:
+  - `python -m py_compile scripts\read_pptx.py scripts\read_office.py tests\test_office_reader.py`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 49 tests
+- Real PPTX smoke:
+  - Source: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\pptx-comment-author-20260603\launch-deck-author-smoke.pptx`
+  - Command: `read_office.py ... --mode fast --no-openai-vision`
+  - Output: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\pptx-comment-author-20260603\out`
+  - Result: success
+  - Manifest comment: `author_id=0`, `author=Launch Reviewer`, `initials=LR`, text `Clarify launch date.`
+  - Review item preserved `author=Launch Reviewer`, `initials=LR`, and slide/comment-part location.
+
+### Remaining Risks
+
+- Older or non-standard PowerPoint comment formats may omit `ppt/commentAuthors.xml`; in those cases comments still export text/date but no author metadata.
+
+### Next Round Direction
+
+- Add review-item CSV export for spreadsheet-friendly audit workflows.
+
 ## 2026-06-03 - Review item export for comments and tracked revisions
 
 ### Problems Found

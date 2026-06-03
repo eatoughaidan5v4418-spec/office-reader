@@ -80,8 +80,31 @@ def extract_notes(package: zipfile.ZipFile, slide_path: str, slide_index: int, r
     return notes
 
 
-def extract_comments(package: zipfile.ZipFile, slide_path: str, slide_index: int, rels: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
+def comment_authors(package: zipfile.ZipFile) -> dict[str, dict[str, str]]:
+    root = read_xml(package, "ppt/commentAuthors.xml")
+    if root is None:
+        return {}
+    authors: dict[str, dict[str, str]] = {}
+    for node in root.iter(qn("p", "cmAuthor")):
+        author_id = node.attrib.get("id")
+        if not author_id:
+            continue
+        authors[author_id] = {
+            "author": node.attrib.get("name", ""),
+            "initials": node.attrib.get("initials", ""),
+        }
+    return authors
+
+
+def extract_comments(
+    package: zipfile.ZipFile,
+    slide_path: str,
+    slide_index: int,
+    rels: dict[str, dict[str, str]],
+    authors: dict[str, dict[str, str]] | None = None,
+) -> list[dict[str, Any]]:
     comments: list[dict[str, Any]] = []
+    authors = authors or {}
     comment_parts = []
     for rel in rels.values():
         if "comment" in rel.get("type", "").lower():
@@ -97,8 +120,25 @@ def extract_comments(package: zipfile.ZipFile, slide_path: str, slide_index: int
         for node in root.iter():
             if node.tag in {qn("p", "cm"), qn("p", "cmAuthor")}:
                 text = collect_plain_text(node)
+                if not text:
+                    text_node = node.find("p:text", NS)
+                    text = text_node.text.strip() if text_node is not None and text_node.text else ""
                 if text:
-                    comments.append({"slide_index": slide_index, "part": part, "text": text, "date": node.attrib.get("dt", "")})
+                    author_id = node.attrib.get("authorId", "")
+                    author = authors.get(author_id, {})
+                    comment = {
+                        "slide_index": slide_index,
+                        "part": part,
+                        "text": text,
+                        "date": node.attrib.get("dt", ""),
+                    }
+                    if author_id:
+                        comment["author_id"] = author_id
+                    if author.get("author"):
+                        comment["author"] = author["author"]
+                    if author.get("initials"):
+                        comment["initials"] = author["initials"]
+                    comments.append(comment)
             elif local_name_fallback(node.tag) == "text" and node.text:
                 comments.append({"slide_index": slide_index, "part": part, "text": node.text.strip(), "date": ""})
     seen = set()
@@ -286,6 +326,7 @@ def extract_pptx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
         manifest["metadata"] = core_properties(package)
         slide_paths = presentation_slide_paths(package)
         media = media_members(package, "ppt/media/")
+        authors = comment_authors(package)
 
         for index, slide_path in enumerate(slide_paths, start=1):
             root = read_xml(package, slide_path)
@@ -299,7 +340,7 @@ def extract_pptx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
             body_text = "\n".join(texts)
             rels = read_relationships(package, slide_relationships_member(slide_path))
             notes = extract_notes(package, slide_path, index, rels)
-            comments = extract_comments(package, slide_path, index, rels)
+            comments = extract_comments(package, slide_path, index, rels, authors)
             manifest["notes"].extend(notes)
             manifest["comments"].extend(comments)
 

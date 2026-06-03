@@ -393,6 +393,7 @@ def review_items_for_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                 "kind": "comment",
                 "comment_id": str(comment.get("id", "")),
                 "author": comment.get("author", ""),
+                "initials": comment.get("initials", ""),
                 "date": comment.get("date", ""),
                 "text": " ".join(str(comment.get("text", "")).split()),
                 "anchor_text": " ".join(str(comment.get("anchor_text", "")).split()),
