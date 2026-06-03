@@ -2,7 +2,7 @@
 
 `office-reader` writes a manifest JSON file beside the Markdown transcript and report.
 
-The unified `scripts/read_office.py` command also prints a small JSON object to stdout with `full_markdown`, `manifest`, and `report` paths. Stdout/stderr are configured as UTF-8 so callers can decode output paths reliably when paths contain Chinese characters or spaces. PowerShell 5 callers should read generated JSON files with `-Encoding UTF8`.
+The unified `scripts/read_office.py` command also prints a small JSON object to stdout with `full_markdown`, `manifest`, and `report` paths. When `--query` is used, stdout also includes `query_results`. Stdout/stderr are configured as UTF-8 so callers can decode output paths reliably when paths contain Chinese characters or spaces. PowerShell 5 callers should read generated JSON files with `-Encoding UTF8`.
 
 ## Top-Level Fields
 
@@ -20,8 +20,25 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `visual_analysis`: visual pipeline status, selected mode, rendered page count, analyzed item count, cache hits, backends, and messages.
 - `visual_findings`: flags for media, drawings, image-heavy content, OCR text, rendered-page observations, vision summaries, diagram summaries, confidence, backend, duration, and cache status.
 - `embedded_media`: extracted packaged media records with package member, extracted path, hash, content type, cache status, derived label, optional EMF PNG preview path, and optional context records.
+- `query`: present when `--query` is used. Contains the query string, normalized tokens, total match count, returned match excerpts, truncation flag, source type, and location metadata.
 - `completeness_score`: conservative extraction coverage score. It combines text coverage, table coverage, verified visual coverage, OCR coverage, OpenAI vision use, unverified visual count, and score signals.
 - `artifacts`: paths to generated `.full.md`, `.manifest.json`, and report files.
+
+## Query Results
+
+When `read_office.py --query "<text>"` is provided, the reader writes `<basename>.query.json`, records the same data under `manifest.query`, adds `artifacts.query_results`, includes `query_results` in stdout, and adds a `Query Results` section to the report.
+
+The query scan covers extracted structure text, tables, comments, comment anchors, revisions, speaker notes, OCR/vision text fields, media relationship context, and embedded-media labels. Matching is case-insensitive and requires all whitespace-separated query tokens to appear in a candidate text field.
+
+`<basename>.query.json` fields:
+
+- `query`: original query text.
+- `tokens`: normalized case-folded tokens.
+- `total_matches`: total matched candidates before limit truncation.
+- `matches`: returned match excerpts with `source_type`, `location`, and `text`.
+- `truncated`: whether additional matches were omitted by `--query-limit`.
+
+Query results are lookup aids over already extracted text. They do not prove that unverified image-only content was OCR-read or visually understood.
 
 ## Revision Markers In Markdown
 

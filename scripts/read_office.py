@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -255,6 +256,141 @@ def assemble_report(manifest_path: Path) -> Path:
     return report_path
 
 
+def compact_text(value: Any, limit: int = 260) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "..."
+
+
+def query_tokens(query: str) -> list[str]:
+    return [token.casefold() for token in query.split() if token.strip()]
+
+
+def text_matches_query(text: str, tokens: list[str]) -> bool:
+    haystack = text.casefold()
+    return bool(tokens) and all(token in haystack for token in tokens)
+
+
+def add_query_candidate(candidates: list[dict[str, Any]], source_type: str, location: dict[str, Any], text: Any) -> None:
+    normalized = " ".join(str(text or "").split())
+    if normalized:
+        candidates.append({"source_type": source_type, "location": location, "text": normalized})
+
+
+def query_candidates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for item in manifest.get("structure", []):
+        location = {
+            "index": item.get("index"),
+            "slide_index": item.get("slide_index"),
+            "part_type": item.get("part_type"),
+            "part": item.get("part"),
+            "container": item.get("container"),
+        }
+        add_query_candidate(candidates, "structure", location, item.get("title") or item.get("text"))
+    for table in manifest.get("tables", []):
+        for row_index, row in enumerate(table.get("rows", []), start=1):
+            location = {
+                "table_index": table.get("index"),
+                "row_index": row_index,
+                "slide_index": table.get("slide_index"),
+                "part_type": table.get("part_type"),
+                "part": table.get("part"),
+                "container": table.get("container"),
+            }
+            add_query_candidate(candidates, "table", location, " | ".join(str(cell) for cell in row))
+    for comment in manifest.get("comments", []):
+        location = {
+            "id": comment.get("id"),
+            "slide_index": comment.get("slide_index"),
+            "table_index": comment.get("table_index"),
+            "row_index": comment.get("row_index"),
+            "cell_index": comment.get("cell_index"),
+            "part_type": comment.get("part_type"),
+            "part": comment.get("part"),
+            "container": comment.get("container"),
+            "anchor_text": comment.get("anchor_text"),
+        }
+        add_query_candidate(candidates, "comment", location, comment.get("text"))
+        add_query_candidate(candidates, "comment_anchor", location, comment.get("anchor_text"))
+    for revision in manifest.get("revisions", []):
+        location = {
+            "type": revision.get("type"),
+            "table_index": revision.get("table_index"),
+            "row_index": revision.get("row_index"),
+            "cell_index": revision.get("cell_index"),
+            "part_type": revision.get("part_type"),
+            "part": revision.get("part"),
+            "container": revision.get("container"),
+        }
+        add_query_candidate(candidates, "revision", location, revision.get("text"))
+    for note in manifest.get("notes", []):
+        add_query_candidate(candidates, "speaker_note", {"slide_index": note.get("slide_index")}, note.get("text"))
+    for finding in manifest.get("visual_findings", []):
+        location = {"page_index": finding.get("page_index"), "slide_index": finding.get("slide_index")}
+        for key, source_type in (
+            ("ocr_text", "visual_ocr"),
+            ("vision_summary", "visual_summary"),
+            ("diagram_summary", "diagram_summary"),
+            ("reason", "visual_finding"),
+        ):
+            add_query_candidate(candidates, source_type, location, finding.get(key))
+        for rel in finding.get("relationships", []):
+            rel_location = {
+                "target": rel.get("target"),
+                "paragraph_index": rel.get("paragraph_index"),
+                "table_index": rel.get("table_index"),
+                "row_index": rel.get("row_index"),
+                "cell_index": rel.get("cell_index"),
+                "slide_index": rel.get("slide_index"),
+                "part_type": rel.get("part_type"),
+                "part": rel.get("part"),
+                "container": rel.get("container"),
+            }
+            for key in ("caption", "paragraph_text", "nearest_heading", "nearby_text_before", "nearby_text_after", "alt_text", "title", "name"):
+                add_query_candidate(candidates, f"media_{key}", rel_location, rel.get(key))
+    for item in manifest.get("embedded_media", []):
+        location = {"member": item.get("member"), "path": item.get("path")}
+        add_query_candidate(candidates, "embedded_media", location, item.get("label") or item.get("member"))
+    return candidates
+
+
+def apply_query(manifest_path: Path, query: str, limit: int = 20) -> Path:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    tokens = query_tokens(query)
+    matches = []
+    seen = set()
+    for candidate in query_candidates(manifest):
+        text = candidate.get("text", "")
+        if not text_matches_query(text, tokens):
+            continue
+        identity = (candidate.get("source_type"), json.dumps(candidate.get("location", {}), sort_keys=True), text)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        matches.append(
+            {
+                "source_type": candidate.get("source_type"),
+                "location": candidate.get("location", {}),
+                "text": compact_text(text, 500),
+            }
+        )
+    query_path = manifest_path.with_name(manifest_path.name.replace(".manifest.json", ".query.json"))
+    result = {
+        "query": query,
+        "tokens": tokens,
+        "total_matches": len(matches),
+        "matches": matches[:limit],
+        "truncated": len(matches) > limit,
+    }
+    query_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest["query"] = result
+    manifest.setdefault("artifacts", {})["query_results"] = str(query_path)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return query_path
+
+
 def bootstrap_deps(include_system_tools: bool = False) -> dict:
     command = [
         "powershell",
@@ -330,6 +466,8 @@ def main() -> int:
     parser.add_argument("--install-missing-deps", action="store_true")
     parser.add_argument("--install-system-tools", action="store_true")
     parser.add_argument("--visual-timeout-seconds", type=int, default=90)
+    parser.add_argument("--query", default=None, help="Write a query-results artifact for a quick text lookup.")
+    parser.add_argument("--query-limit", type=int, default=20, help="Maximum query matches to include in the artifact.")
     args = parser.parse_args()
 
     source = args.source.resolve()
@@ -342,6 +480,7 @@ def main() -> int:
     ext = source.suffix.lower()
     conversion = None
     normalized = source
+    query_path = None
     try:
         if args.install_missing_deps:
             bootstrap_deps(include_system_tools=args.install_system_tools)
@@ -349,6 +488,8 @@ def main() -> int:
             if args.mode == "fast":
                 extraction = extract_legacy_text(source, out_dir)
                 manifest_path = write_legacy_text_artifacts(source, out_dir, extraction, None, args.mode)
+                if args.query:
+                    query_path = apply_query(manifest_path, args.query, args.query_limit)
                 report_path = assemble_report(manifest_path)
                 normalized = Path(extraction.get("output_path", source)).resolve()
                 result = {
@@ -356,6 +497,8 @@ def main() -> int:
                     "manifest": str(manifest_path),
                     "report": str(report_path),
                 }
+                if query_path:
+                    result["query_results"] = str(query_path)
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
             try:
@@ -368,6 +511,8 @@ def main() -> int:
                 conversion_failure = parse_conversion_error(conversion_exc)
                 extraction = extract_legacy_text(source, out_dir)
                 manifest_path = write_legacy_text_artifacts(source, out_dir, extraction, conversion_failure, args.mode)
+                if args.query:
+                    query_path = apply_query(manifest_path, args.query, args.query_limit)
                 report_path = assemble_report(manifest_path)
                 normalized = Path(extraction.get("output_path", source)).resolve()
                 result = {
@@ -375,6 +520,8 @@ def main() -> int:
                     "manifest": str(manifest_path),
                     "report": str(report_path),
                 }
+                if query_path:
+                    result["query_results"] = str(query_path)
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
         elif ext not in {".docx", ".pptx"}:
@@ -391,6 +538,8 @@ def main() -> int:
             enable_openai_vision=not args.no_openai_vision,
             timeout_seconds=args.visual_timeout_seconds,
         )
+        if args.query:
+            query_path = apply_query(manifest_path, args.query, args.query_limit)
         report_path = assemble_report(manifest_path)
     except Exception as exc:
         print(str(exc), file=sys.stderr)
@@ -401,6 +550,8 @@ def main() -> int:
         "manifest": str(manifest_path),
         "report": str(report_path),
     }
+    if query_path:
+        result["query_results"] = str(query_path)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

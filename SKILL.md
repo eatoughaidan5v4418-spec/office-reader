@@ -27,6 +27,8 @@ Use this skill to turn Word and PowerPoint files into a full Markdown transcript
 - `--mode balanced`: default. Render pages/slides only when visual risk is detected, OCR/vision-analyze selected items, and use cache.
 - `--mode complete`: render and analyze every page/slide. Use when the user asks to fully understand image-heavy or evidence-critical documents.
 
+Use `--query "<text>"` with any mode to write a focused `<basename>.query.json` lookup artifact and add a Query Results section to the report. The lookup scans extracted structure text, tables, comments, comment anchors, revisions, speaker notes, OCR/vision text, media relationship context, and embedded-media labels. It is an extracted-text lookup, not proof that unverified image-only content was read.
+
 Use `--no-openai-vision` when cloud visual analysis is not allowed. Without `OPENAI_API_KEY`, local OCR still runs when available and the report clearly lists remaining visual gaps.
 
 ## Dependency Bootstrap
@@ -46,6 +48,7 @@ Every successful read produces:
 - `<basename>.full.md`: full Markdown transcript with headings, slide boundaries, tables, comments, revisions, and notes where extractable.
 - `<basename>.manifest.json`: structured extraction data plus `reading_mode`, `visual_analysis`, and `completeness_score`. See `references/output_schema.md`.
 - `<basename>.report.md`: structured reading report with summary, read completeness, outline, tables, comments/revisions, notes, visual findings, risks, and artifacts.
+- `<basename>.query.json`: generated when `--query` is provided, with query tokens, match count, source type, location metadata, and matched excerpts.
 - `embedded_media/`: extracted packaged images and media when OOXML relationships reference `word/media` or `ppt/media`. Manifest `embedded_media[]` records include a derived `label` when captions, alt text, object names, or nearby context are available. EMF files are cached as PNG previews when Windows GDI+ conversion is available.
 - `media_contact_sheet.jpg` and `media_summary.json`: lightweight visual index of extracted image-like media, with labels from captions/alt text/nearby context when available.
 
@@ -85,6 +88,7 @@ The default preview health file is `.office-reader-cache/preview-backend-health.
 
 ```powershell
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode balanced
+python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode fast --query "experiment eight"
 python scripts\read_office.py C:\path\file.pptx --out-dir C:\path\out --mode complete
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode balanced --no-openai-vision
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\bootstrap_deps.ps1 -DryRun -IncludeSystemTools

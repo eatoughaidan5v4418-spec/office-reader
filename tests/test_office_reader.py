@@ -885,6 +885,41 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertIn("# Structured Reading Report: board-memo.docx", report)
             self.assertIn("- Comments: 2", report)
 
+    def test_unified_reader_query_writes_matches_to_manifest_report_and_stdout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "board-memo.docx"
+            out_dir = tmp_path / "out"
+            make_docx(source)
+
+            proc = self.run_script(
+                "read_office.py",
+                source,
+                "--out-dir",
+                out_dir,
+                "--mode",
+                "fast",
+                "--query",
+                "ARR source",
+                "--no-openai-vision",
+            )
+
+            stdout = json.loads(proc.stdout)
+            self.assertIn("query_results", stdout)
+            query_path = Path(stdout["query_results"])
+            self.assertTrue(query_path.exists())
+            query = json.loads(query_path.read_text(encoding="utf-8"))
+            self.assertEqual(query["query"], "ARR source")
+            self.assertGreaterEqual(query["total_matches"], 1)
+            self.assertTrue(any("Please verify the ARR source." in item["text"] for item in query["matches"]))
+
+            manifest = json.loads((out_dir / "board-memo.manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["query"]["query"], "ARR source")
+            self.assertEqual(manifest["artifacts"]["query_results"], str(query_path))
+            report = (out_dir / "board-memo.report.md").read_text(encoding="utf-8")
+            self.assertIn("## Query Results", report)
+            self.assertIn("ARR source", report)
+
     def test_unified_reader_stdout_json_is_utf8_safe_for_chinese_paths(self):
         with tempfile.TemporaryDirectory(prefix="office-reader-") as tmp:
             tmp_path = Path(tmp) / "\u4e2d\u6587 path smoke"

@@ -61,6 +61,7 @@ def build_report(manifest: dict[str, Any]) -> str:
     visual_analysis = manifest.get("visual_analysis", {})
     conversion = manifest.get("conversion", {})
     completeness = manifest.get("completeness_score", {})
+    query = manifest.get("query", {})
 
     lines: list[str] = [f"# Structured Reading Report: {name}", ""]
     lines.extend(
@@ -93,6 +94,21 @@ def build_report(manifest: dict[str, Any]) -> str:
     else:
         lines.append("- No completeness score was recorded.")
     lines.append("")
+
+    if query:
+        lines.extend(["## Query Results", ""])
+        lines.append(bullet("Query", query.get("query", "")))
+        lines.append(bullet("Matches", query.get("total_matches", 0)))
+        if query.get("truncated"):
+            lines.append("- Results were truncated; open the query artifact for the full available set.")
+        for match in query.get("matches", [])[:20]:
+            location = match.get("location", {}) or {}
+            location_bits = [f"{key}={value}" for key, value in location.items() if value not in (None, "")]
+            where = f" ({', '.join(location_bits)})" if location_bits else ""
+            lines.append(f"- {match.get('source_type', 'match')}{where}: {first_sentence(match.get('text', ''), 320)}")
+        if not query.get("matches"):
+            lines.append("- No matches found in extracted text, comments, revisions, notes, tables, or visual text fields.")
+        lines.append("")
 
     lines.extend(["## Outline", ""])
     if structure:

@@ -1,5 +1,54 @@
 # Office Reader Iteration Log
 
+## 2026-06-03 - Unified reader query lookup artifact
+
+### Problems Found
+
+- `--mode fast` was useful for simple lookups, but callers still had to open the Markdown/report and manually search for relevant excerpts.
+- The unified stdout JSON did not expose a focused lookup artifact for automation.
+- Reports had no dedicated section showing query hits and their manifest locations.
+
+### Changes Completed
+
+- Added `read_office.py --query "<text>"` and `--query-limit`.
+- Added `<basename>.query.json` with normalized tokens, match count, source type, location metadata, excerpts, and truncation flag.
+- Added `manifest.query`, `artifacts.query_results`, and stdout `query_results`.
+- Query scan covers extracted structure text, tables, comments, comment anchors, revisions, speaker notes, OCR/vision text fields, media relationship context, and embedded-media labels.
+- Added a Query Results section to `assemble_report.py`.
+- Updated `SKILL.md`, `README.md`, and `references/output_schema.md`.
+
+### Verification
+
+- TDD red test:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_unified_reader_query_writes_matches_to_manifest_report_and_stdout -v`
+  - Initial result: failed because `read_office.py` did not recognize `--query`.
+- Focused test after implementation:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_unified_reader_query_writes_matches_to_manifest_report_and_stdout -v`
+  - Result: `OK`
+- Syntax check:
+  - `python -m py_compile scripts\read_office.py scripts\assemble_report.py tests\test_office_reader.py`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 37 tests
+- Real PowerPoint query smoke:
+  - Source: `C:\Users\Huang\Documents\标题幻灯片选项 1.pptx`
+  - Command: `read_office.py ... --mode fast --query "标题" --no-openai-vision`
+  - Output: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\query-round-20260603-title-pptx`
+  - Result: success
+  - Query matches: `4`
+  - Report includes `## Query Results` and slide hits such as `标题幻灯片选项 1`.
+
+### Remaining Risks
+
+- Query mode searches already extracted text fields. It does not OCR unverified image-only content by itself.
+- Matching is intentionally simple all-token substring matching; fuzzy matching and ranking are not implemented yet.
+
+### Next Round Direction
+
+- Add lightweight media-level OCR for selected extracted images so fast visual lookups can cover common screenshot/diagram text without rendering every page.
+
 ## 2026-06-03 - Embedded media manifest labels
 
 ### Problems Found
