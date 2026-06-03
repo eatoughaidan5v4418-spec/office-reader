@@ -2,7 +2,7 @@
 
 `office-reader` writes a manifest JSON file beside the Markdown transcript and report.
 
-The unified `scripts/read_office.py` command also prints a small JSON object to stdout with `full_markdown`, `manifest`, and `report` paths. When comments or tracked revisions are extracted, stdout also includes `review_items` and `review_items_csv`. When `--query` is used, stdout also includes `query_results`. Stdout/stderr are configured as UTF-8 so callers can decode output paths reliably when paths contain Chinese characters or spaces. PowerShell 5 callers should read generated JSON files with `-Encoding UTF8`.
+The unified `scripts/read_office.py` command also prints a small JSON object to stdout with `full_markdown`, `manifest`, and `report` paths. When comments or tracked revisions are extracted, stdout also includes `review_items`, `review_items_csv`, and `review_items_markdown`. When `--query` is used, stdout also includes `query_results`. Stdout/stderr are configured as UTF-8 so callers can decode output paths reliably when paths contain Chinese characters or spaces. PowerShell 5 callers should read generated JSON files with `-Encoding UTF8`.
 
 ## Top-Level Fields
 
@@ -26,7 +26,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 
 ## Review Items
 
-When comments or tracked revisions are extracted, `read_office.py` writes `<basename>.review-items.json` plus UTF-8-BOM `<basename>.review-items.csv`, records the paths under `manifest.artifacts.review_items` and `manifest.artifacts.review_items_csv`, includes `review_items` and `review_items_csv` in stdout, and lists both in the report artifacts.
+When comments or tracked revisions are extracted, `read_office.py` writes `<basename>.review-items.json`, UTF-8-BOM `<basename>.review-items.csv`, and checkbox-style `<basename>.review-items.md`; records the paths under `manifest.artifacts.review_items`, `manifest.artifacts.review_items_csv`, and `manifest.artifacts.review_items_markdown`; includes all three in stdout; and lists them in the report artifacts.
 
 `<basename>.review-items.json` fields:
 
@@ -42,6 +42,8 @@ When comments or tracked revisions are extracted, `read_office.py` writes `<base
 
 - `id`, `kind`, `status`, `comment_id`, `revision_type`, `author`, `initials`, `date`, `text`, `anchor_text`
 - `paragraph_index`, `slide_index`, `table_index`, `row_index`, `cell_index`, `part_type`, `part`, `container`
+
+`<basename>.review-items.md` is a lightweight Markdown checklist. Each item is rendered as an unchecked task with text plus a compact metadata line for author/date/type/location when available.
 
 ## Query Results
 

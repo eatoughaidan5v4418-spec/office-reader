@@ -26,6 +26,7 @@ def artifact_label(key: str) -> str:
         "query_results": "Query results",
         "review_items": "Review items",
         "review_items_csv": "Review items CSV",
+        "review_items_markdown": "Review checklist",
         "media_contact_sheet": "Media contact sheet",
         "media_summary": "Media summary",
         "preview_pdf": "Preview PDF",

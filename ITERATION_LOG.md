@@ -1,5 +1,55 @@
 # Office Reader Iteration Log
 
+## 2026-06-03 - Review item Markdown checklist export
+
+### Problems Found
+
+- Review items were available as JSON and spreadsheet CSV, but not as a lightweight human checklist.
+- Manual reviewers needed to open JSON/CSV or the full report instead of a focused task list.
+- The report artifact labeler did not have a human-friendly label for a review checklist artifact.
+
+### Changes Completed
+
+- Added `<basename>.review-items.md` generation beside JSON and CSV review-item artifacts.
+- Added `manifest.artifacts.review_items_markdown` and stdout `review_items_markdown`.
+- Markdown checklist items use unchecked task boxes, item kind/id, text, author/date/type when available, and compact source location.
+- Updated report artifact labels so `review_items_markdown` appears as `Review checklist`.
+- Updated `SKILL.md`, `README.md`, and `references/output_schema.md`.
+
+### Verification
+
+- TDD red test:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_unified_reader_writes_review_items_artifact -v`
+  - Initial result: failed because stdout did not include `review_items_markdown`.
+- Focused tests after implementation:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_unified_reader_writes_review_items_artifact tests.test_office_reader.OfficeReaderTests.test_unified_reader_preserves_pptx_comment_author_in_review_items tests.test_office_reader.OfficeReaderTests.test_report_assembler_uses_manifest_counts_and_outline -v`
+  - Result: `OK`
+- Syntax check:
+  - `python -m py_compile scripts\read_office.py scripts\assemble_report.py tests\test_office_reader.py`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 49 tests
+- Real DOCX smoke:
+  - Source: `C:\Users\Huang\Desktop\Proj\答辩\(黄曼)基于STM32多参数水质实时监测系统设计与实现 .docx`
+  - Command: `read_office.py ... --mode fast --no-openai-vision`
+  - Output: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\review-items-md-20260603-real-docx`
+  - Result: success
+  - `review_items_markdown` appeared in stdout and `manifest.artifacts.review_items_markdown`.
+  - Markdown title `# Review Checklist`: present
+  - Checkbox count: `9`
+  - JSON `total_items`: `9`
+  - Checklist contained compact `location:` metadata.
+
+### Remaining Risks
+
+- Checklist completion state is intentionally not persisted back into JSON/CSV; it is a lightweight manual-review surface.
+
+### Next Round Direction
+
+- Add review item filters for comments-only or revisions-only export.
+
 ## 2026-06-03 - Review item CSV export
 
 ### Problems Found

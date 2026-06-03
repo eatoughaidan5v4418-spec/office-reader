@@ -9,6 +9,7 @@ It reads `.doc`, `.docx`, `.ppt`, and `.pptx` into:
 - `<basename>.report.md`
 - `<basename>.review-items.json` when comments or tracked revisions are present
 - `<basename>.review-items.csv` when comments or tracked revisions are present
+- `<basename>.review-items.md` when comments or tracked revisions are present
 
 The default path is Microsoft Office COM first for legacy conversion, then optional WPS, then LibreOffice. Preview rendering uses Office COM when healthy and falls back to LibreOffice; slow or invalid COM preview runs are remembered in `.office-reader-cache/preview-backend-health.json`. Visual deep reading combines OOXML extraction, embedded media extraction, rendered page/slide analysis, local OCR, optional OpenAI vision, and cache reuse.
 
@@ -37,7 +38,7 @@ Use `--mode fast` for simple lookup tasks such as finding a section, question, o
 
 Use `--query "<text>"` with any mode to generate `<basename>.query.json`, add `manifest.query`, include `query_results` in stdout, and add a Query Results section to the report. Query mode searches extracted structure text, tables, comments, comment anchors, revisions, speaker notes, OCR/vision text fields, media context, and embedded-media labels.
 
-When comments or tracked revisions are present, `read_office.py` generates `<basename>.review-items.json` and UTF-8-BOM `<basename>.review-items.csv`, records them in `manifest.artifacts.review_items` and `manifest.artifacts.review_items_csv`, and includes `review_items`/`review_items_csv` in stdout. These flat artifacts are intended for human review queues, spreadsheets, and downstream audit tools.
+When comments or tracked revisions are present, `read_office.py` generates `<basename>.review-items.json`, UTF-8-BOM `<basename>.review-items.csv`, and checkbox-style `<basename>.review-items.md`; records them in `manifest.artifacts.review_items`, `manifest.artifacts.review_items_csv`, and `manifest.artifacts.review_items_markdown`; and includes all three paths in stdout. These flat artifacts are intended for human review queues, spreadsheets, lightweight checklists, and downstream audit tools.
 
 Use `--media-ocr selected` to OCR selected extracted embedded images or EMF previews without rendering full pages. Use `--media-ocr all` to attempt every image-like extracted media item. Media OCR results are written to `embedded_media[].ocr_text`, `media_summary.json`, `visual_findings[]`, and the report, so `--query` can find text recovered from embedded images.
 

@@ -461,6 +461,65 @@ def write_review_csv(path: Path, items: list[dict[str, Any]]) -> None:
     path.write_text("\ufeff" + buffer.getvalue(), encoding="utf-8")
 
 
+def review_markdown_escape(value: Any) -> str:
+    text = " ".join(str(value or "").split())
+    return text.replace("\\", "\\\\").replace("|", "\\|")
+
+
+def review_location_summary(location: dict[str, Any]) -> str:
+    parts = []
+    if location.get("slide_index"):
+        parts.append(f"slide {location.get('slide_index')}")
+    if location.get("paragraph_index"):
+        parts.append(f"paragraph {location.get('paragraph_index')}")
+    if location.get("table_index"):
+        table = f"table {location.get('table_index')}"
+        if location.get("row_index"):
+            table += f" row {location.get('row_index')}"
+        if location.get("cell_index"):
+            table += f" cell {location.get('cell_index')}"
+        parts.append(table)
+    if location.get("part"):
+        parts.append(f"part {location.get('part')}")
+    if location.get("container"):
+        parts.append(f"container {location.get('container')}")
+    return ", ".join(parts) if parts else "document"
+
+
+def write_review_markdown(path: Path, payload: dict[str, Any]) -> None:
+    items = payload.get("items", [])
+    counts = payload.get("counts", {})
+    lines = [
+        "# Review Checklist",
+        "",
+        f"- Total items: {payload.get('total_items', 0)}",
+        f"- Comments: {counts.get('comments', 0)}",
+        f"- Revisions: {counts.get('revisions', 0)}",
+        "",
+    ]
+    for item in items:
+        label = "Comment" if item.get("kind") == "comment" else "Revision"
+        item_id = item.get("id", "")
+        text = review_markdown_escape(item.get("text", ""))
+        if item.get("anchor_text"):
+            text += f" (anchor: {review_markdown_escape(item.get('anchor_text'))})"
+        details = []
+        if item.get("author"):
+            author = review_markdown_escape(item.get("author"))
+            if item.get("initials"):
+                author += f" ({review_markdown_escape(item.get('initials'))})"
+            details.append(f"author: {author}")
+        if item.get("date"):
+            details.append(f"date: {review_markdown_escape(item.get('date'))}")
+        if item.get("revision_type"):
+            details.append(f"type: {review_markdown_escape(item.get('revision_type'))}")
+        location = review_location_summary(item.get("location", {}))
+        details.append(f"location: {review_markdown_escape(location)}")
+        lines.append(f"- [ ] {label} {item_id}: {text}")
+        lines.append(f"  - {'; '.join(details)}")
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
 def write_review_items(manifest_path: Path) -> dict[str, Path]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     items = review_items_for_manifest(manifest)
@@ -468,6 +527,7 @@ def write_review_items(manifest_path: Path) -> dict[str, Path]:
         return {}
     review_path = manifest_path.with_name(manifest_path.name.replace(".manifest.json", ".review-items.json"))
     review_csv_path = manifest_path.with_name(manifest_path.name.replace(".manifest.json", ".review-items.csv"))
+    review_md_path = manifest_path.with_name(manifest_path.name.replace(".manifest.json", ".review-items.md"))
     payload = {
         "source": manifest.get("source", {}),
         "document_type": manifest.get("document_type", ""),
@@ -480,10 +540,12 @@ def write_review_items(manifest_path: Path) -> dict[str, Path]:
     }
     review_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     write_review_csv(review_csv_path, items)
+    write_review_markdown(review_md_path, payload)
     manifest.setdefault("artifacts", {})["review_items"] = str(review_path)
     manifest.setdefault("artifacts", {})["review_items_csv"] = str(review_csv_path)
+    manifest.setdefault("artifacts", {})["review_items_markdown"] = str(review_md_path)
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"review_items": review_path, "review_items_csv": review_csv_path}
+    return {"review_items": review_path, "review_items_csv": review_csv_path, "review_items_markdown": review_md_path}
 
 
 def apply_query(manifest_path: Path, query: str, limit: int = 20) -> Path:
