@@ -176,9 +176,19 @@ def build_report(manifest: dict[str, Any]) -> str:
         for item in embedded_media[:80]:
             preview = f", preview={item.get('preview_path')}" if item.get("preview_path") else ""
             cache = "cache hit" if item.get("cache_hit") else "extracted"
-            lines.append(f"- {item.get('member')}: {item.get('content_type')} {cache}, path={item.get('path')}{preview}")
+            contexts = item.get("contexts", []) or []
+            label = ""
+            if contexts:
+                first = contexts[0]
+                label = first.get("caption") or first.get("alt_text") or first.get("title") or first.get("name") or first.get("nearest_heading") or ""
+            label_text = f", label={first_sentence(label, 120)}" if label else ""
+            lines.append(f"- {item.get('member')}: {item.get('content_type')} {cache}{label_text}, path={item.get('path')}{preview}")
     else:
         lines.append("- No embedded media files were extracted.")
+    if manifest.get("artifacts", {}).get("media_contact_sheet"):
+        lines.append(f"- Contact sheet: {manifest['artifacts']['media_contact_sheet']}")
+    if manifest.get("artifacts", {}).get("media_summary"):
+        lines.append(f"- Media summary: {manifest['artifacts']['media_summary']}")
     lines.append("")
 
     lines.extend(["## Visual Deep Read", ""])

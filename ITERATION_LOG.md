@@ -366,6 +366,53 @@
 
 - Extend PPTX object inventory to SmartArt, OLE, video, and audio with minimal synthetic fixtures.
 
+## 2026-06-03 - Media contact sheet and summary index
+
+### Problems Found
+
+- Embedded media extraction produced individual files, but there was no single fast artifact for visually scanning all diagrams/screenshots.
+- The report listed extracted media paths, but automation had to inspect the manifest to find labels and contexts.
+- Test fixtures for newly added figure captions contained encoding-damaged Chinese strings, making the tests less portable across Windows consoles.
+
+### Changes Completed
+
+- Added `media_summary.json` with media member, extracted path, preview path, hash, content type, derived label, and context records.
+- Added `media_contact_sheet.jpg` for image-like media and EMF PNG previews.
+- Attached DOCX/PPTX relationship context records directly to matching `embedded_media[]` items.
+- Report now lists contact sheet and media summary artifact paths and includes labels when available.
+- Replaced fragile non-ASCII caption fixture strings in the new tests with ASCII figure labels while keeping separate Chinese-path coverage.
+- Updated `SKILL.md`, `README.md`, and `references/output_schema.md`.
+
+### Verification
+
+- Focused tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_visual_analysis_fast_extracts_embedded_media_and_report_lists_context tests.test_office_reader.OfficeReaderTests.test_docx_reader_binds_media_to_caption_and_context tests.test_office_reader.OfficeReaderTests.test_docx_reader_uses_table_cell_paragraph_caption_for_media -v`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 34 tests
+- Real document smoke:
+  - Source: `D:\QQ文件\(黄曼)基于STM32多参数水质实时监测系统设计与实现 .docx`
+  - Command: `read_office.py ... --mode fast --no-openai-vision`
+  - Result: success
+  - Time: about `1.42s`
+  - Produced `media_contact_sheet.jpg` and `media_summary.json`
+  - Contact sheet visually showed EMF flowcharts, simulation screens, PCB layout, hardware photos, sensor circuits, and the mobile UI screenshot.
+  - `media_summary.json` contained `27` media items; report labels included `图3-1 系统硬件电路原理图`, `图3-2 单片机最小系统框`, and `图5-6-1 正常采集与OLED显示测试图`.
+
+### Remaining Risks
+
+- Contact sheets are triage artifacts, not OCR/vision interpretation.
+- Some EMF flowcharts still lack captions/context because the Word package does not expose a simple paragraph relationship for them in current extraction.
+- Cross-row/cross-cell caption matching for layout tables remains incomplete.
+
+### Next Round Direction
+
+- Improve context propagation for image-only table cells by scanning neighboring table rows/cells for captions.
+- Add optional OCR over contact-sheet source images or selected media blocks for fast visual text extraction.
+- Add PPTX media-summary label parity from slide object names, alt text, and slide titles.
+
 ## 2026-06-03 - Embedded media extraction and DOCX figure context
 
 ### Problems Found

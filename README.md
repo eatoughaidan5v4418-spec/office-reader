@@ -14,7 +14,7 @@ Reports include a conservative `completeness_score` so callers can see text/tabl
 
 For PowerPoint files, the manifest and report include a per-slide visual object inventory for images, charts, SmartArt, OLE objects, video, and audio when those objects are visible in slide relationships. These records are risk/location hints; rendered OCR or OpenAI vision is still required before claiming the visual content itself was understood.
 
-For Word files, media relationships include nearby context when OOXML exposes it: paragraph text, table cell coordinates, nearest heading, adjacent text, and detected figure/table captions. The visual pipeline extracts packaged `word/media` or `ppt/media` files into `embedded_media/`; EMF files get cached PNG previews on Windows when GDI+ conversion succeeds.
+For Word files, media relationships include nearby context when OOXML exposes it: paragraph text, table cell coordinates, nearest heading, adjacent text, and detected figure/table captions. The visual pipeline extracts packaged `word/media` or `ppt/media` files into `embedded_media/`; EMF files get cached PNG previews on Windows when GDI+ conversion succeeds. Image-like media are also indexed in `media_summary.json` and `media_contact_sheet.jpg` for quick visual triage.
 
 ## Quick Start
 

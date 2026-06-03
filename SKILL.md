@@ -47,6 +47,7 @@ Every successful read produces:
 - `<basename>.manifest.json`: structured extraction data plus `reading_mode`, `visual_analysis`, and `completeness_score`. See `references/output_schema.md`.
 - `<basename>.report.md`: structured reading report with summary, read completeness, outline, tables, comments/revisions, notes, visual findings, risks, and artifacts.
 - `embedded_media/`: extracted packaged images and media when OOXML relationships reference `word/media` or `ppt/media`. EMF files are cached as PNG previews when Windows GDI+ conversion is available.
+- `media_contact_sheet.jpg` and `media_summary.json`: lightweight visual index of extracted image-like media, with labels from captions/alt text/nearby context when available.
 
 If legacy conversion fails, return the conversion JSON and explain which backends were unavailable. Do not pretend a `.doc` or `.ppt` was read when no normalized `.docx` or `.pptx` exists.
 
@@ -68,7 +69,7 @@ For `.docx`, extract document metadata, paragraphs, heading levels, tables, comm
 
 For `.pptx`, extract presentation metadata, slide order, slide text, tables, speaker notes, comments, media references, and per-slide visual-review flags when media is present. PPTX visual findings include an object inventory for images, charts, SmartArt, OLE objects, video, and audio when the relationship metadata is present in the slide XML.
 
-XML extraction does not fully read text inside images, screenshots, rasterized charts, SmartArt, or complex embedded objects. The visual pipeline always preserves/extracts packaged embedded media when possible. In `balanced` or `complete` mode, it also renders pages/slides when possible, applies local OCR, optionally asks OpenAI vision for diagram/chart/screenshot interpretation, caches results, and writes findings back into `visual_findings`.
+XML extraction does not fully read text inside images, screenshots, rasterized charts, SmartArt, or complex embedded objects. The visual pipeline always preserves/extracts packaged embedded media when possible and creates a contact sheet for quick inspection. In `balanced` or `complete` mode, it also renders pages/slides when possible, applies local OCR, optionally asks OpenAI vision for diagram/chart/screenshot interpretation, caches results, and writes findings back into `visual_findings`.
 
 The `completeness_score` is a conservative coverage signal. Do not treat OOXML media hints, fast-mode placeholders, or rendered-page bookkeeping as proof that visual content was understood. Report `unverified_visual_count` and score signals when answering the user.
 

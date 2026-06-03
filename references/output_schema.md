@@ -19,7 +19,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `notes`: PowerPoint speaker notes.
 - `visual_analysis`: visual pipeline status, selected mode, rendered page count, analyzed item count, cache hits, backends, and messages.
 - `visual_findings`: flags for media, drawings, image-heavy content, OCR text, rendered-page observations, vision summaries, diagram summaries, confidence, backend, duration, and cache status.
-- `embedded_media`: extracted packaged media records with package member, extracted path, hash, content type, cache status, and optional EMF PNG preview path.
+- `embedded_media`: extracted packaged media records with package member, extracted path, hash, content type, cache status, optional EMF PNG preview path, and optional context records.
 - `completeness_score`: conservative extraction coverage score. It combines text coverage, table coverage, verified visual coverage, OCR coverage, OpenAI vision use, unverified visual count, and score signals.
 - `artifacts`: paths to generated `.full.md`, `.manifest.json`, and report files.
 
@@ -54,6 +54,14 @@ For DOCX media relationships found in the body, a non-body Word part, a table ce
 - `content_type`: file extension-derived type such as `png`, `jpeg`, `emf`, or `mp4`.
 - `cache_hit`: whether the extracted copy already existed.
 - `preview_path` and `preview_format`: optional cached PNG preview for EMF files when conversion succeeds.
+- `contexts`: optional relationship/object context copied from `visual_findings`, such as caption, nearest heading, table cell, slide, or alt text.
+
+When image-like media can be opened or previewed, the visual pipeline also writes:
+
+- `media_summary.json`: compact list of media items with paths, preview paths, labels, hashes, and contexts.
+- `media_contact_sheet.jpg`: tiled thumbnail sheet for quick human inspection.
+
+These files are triage aids. They do not prove OCR or semantic understanding unless corresponding `ocr_text`, OpenAI `vision_summary`, or `diagram_summary` fields are present in `visual_findings`.
 
 For PPTX slides, entries under `visual_findings[].objects` may include a structured visual object inventory:
 

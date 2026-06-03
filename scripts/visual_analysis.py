@@ -238,6 +238,118 @@ def extract_embedded_media(
     return extracted
 
 
+def media_context_map(manifest: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    contexts: dict[str, list[dict[str, Any]]] = {}
+    keep = {
+        "relationship_id",
+        "part_type",
+        "part",
+        "container",
+        "table_index",
+        "row_index",
+        "cell_index",
+        "paragraph_index",
+        "paragraph_text",
+        "nearest_heading",
+        "nearby_text_before",
+        "nearby_text_after",
+        "caption",
+        "slide_index",
+        "object_type",
+        "name",
+        "alt_text",
+        "title",
+    }
+    for finding in manifest.get("visual_findings", []) or []:
+        for rel in finding.get("relationships", []) or []:
+            target = str(rel.get("target", "")).replace("\\", "/")
+            if target:
+                contexts.setdefault(target, []).append({key: rel[key] for key in keep if key in rel and rel[key]})
+        for obj in finding.get("objects", []) or []:
+            target = str(obj.get("target", "")).replace("\\", "/")
+            if target:
+                contexts.setdefault(target, []).append({key: obj[key] for key in keep if key in obj and obj[key]})
+    return contexts
+
+
+def attach_media_contexts(manifest: dict[str, Any], embedded_media: list[dict[str, Any]]) -> None:
+    contexts = media_context_map(manifest)
+    for item in embedded_media:
+        item_contexts = contexts.get(str(item.get("member", "")).replace("\\", "/"), [])
+        if item_contexts:
+            item["contexts"] = item_contexts
+
+
+def first_media_label(item: dict[str, Any]) -> str:
+    for context in item.get("contexts", []) or []:
+        for key in ("caption", "alt_text", "title", "name", "nearest_heading"):
+            value = str(context.get(key, "")).strip()
+            if value:
+                return value
+    return str(item.get("member", "media"))
+
+
+def build_media_summary(embedded_media: list[dict[str, Any]], out_dir: Path) -> Path:
+    summary_path = out_dir / "media_summary.json"
+    summary = {
+        "media_count": len(embedded_media),
+        "items": [
+            {
+                "member": item.get("member", ""),
+                "path": item.get("path", ""),
+                "preview_path": item.get("preview_path", ""),
+                "content_type": item.get("content_type", ""),
+                "sha256": item.get("sha256", ""),
+                "label": first_media_label(item),
+                "contexts": item.get("contexts", []),
+            }
+            for item in embedded_media
+        ],
+    }
+    write_json(summary_path, summary)
+    return summary_path
+
+
+def build_contact_sheet(embedded_media: list[dict[str, Any]], out_dir: Path, messages: list[str]) -> Path | None:
+    try:
+        from PIL import Image, ImageDraw  # type: ignore
+    except Exception as exc:
+        messages.append(f"Media contact sheet skipped because Pillow is unavailable: {exc}")
+        return None
+
+    tiles = []
+    for item in embedded_media:
+        candidate = Path(str(item.get("preview_path") or item.get("path") or ""))
+        if candidate.suffix.lower() not in {".png", ".jpg", ".jpeg"} or not candidate.exists():
+            continue
+        try:
+            with Image.open(candidate) as source:
+                image = source.convert("RGB")
+        except Exception as exc:
+            messages.append(f"Media thumbnail skipped for {item.get('member')}: {exc}")
+            continue
+        image.thumbnail((260, 170))
+        tile = Image.new("RGB", (280, 230), "white")
+        tile.paste(image, ((280 - image.width) // 2, 8))
+        draw = ImageDraw.Draw(tile)
+        member = str(item.get("member", "media"))
+        label = first_media_label(item)
+        draw.text((8, 184), member[:44], fill=(0, 0, 0))
+        draw.text((8, 202), label[:44], fill=(40, 40, 40))
+        tiles.append(tile)
+
+    if not tiles:
+        return None
+    cols = 3
+    rows = (len(tiles) + cols - 1) // cols
+    sheet = Image.new("RGB", (cols * 280, rows * 230), (245, 245, 245))
+    for index, tile in enumerate(tiles):
+        sheet.paste(tile, ((index % cols) * 280, (index // cols) * 230))
+    sheet_path = out_dir / "media_contact_sheet.jpg"
+    sheet.save(sheet_path, quality=92)
+    return sheet_path
+
+
 def ensure_visual_fields(finding: dict[str, Any]) -> dict[str, Any]:
     for key, value in VISUAL_FIELDS.items():
         finding.setdefault(key, value)
@@ -652,7 +764,13 @@ def enrich_manifest(
     cache_dir.mkdir(parents=True, exist_ok=True)
     embedded_media = extract_embedded_media(normalized_file, manifest, out_dir, cache_dir, messages)
     if embedded_media:
+        attach_media_contexts(manifest, embedded_media)
+        summary_path = build_media_summary(embedded_media, out_dir)
+        contact_sheet = build_contact_sheet(embedded_media, out_dir, messages)
         manifest.setdefault("artifacts", {})["embedded_media_dir"] = str(out_dir / "embedded_media")
+        manifest["artifacts"]["media_summary"] = str(summary_path)
+        if contact_sheet:
+            manifest["artifacts"]["media_contact_sheet"] = str(contact_sheet)
         manifest["embedded_media"] = embedded_media
         analysis["embedded_media_count"] = len(embedded_media)
 

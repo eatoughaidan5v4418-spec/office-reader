@@ -10,6 +10,11 @@ from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = SKILL_DIR / "scripts"
+VALID_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xff\xff?"
+    b"\x00\x05\xfe\x02\xfeA\xe2\x8a\x9b\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 def write_zip(path, files):
@@ -82,7 +87,7 @@ def make_docx_with_captioned_media(path):
     <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Hardware Design</w:t></w:r></w:p>
     <w:p><w:r><w:t>The sensor board connects STM32 and OLED.</w:t></w:r></w:p>
     <w:p><w:r><w:drawing><a:blip xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" r:embed="rIdBoard"/></w:drawing></w:r></w:p>
-    <w:p><w:r><w:t>图3-1 系统硬件电路原理图</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Figure 3-1 System hardware circuit diagram</w:t></w:r></w:p>
     <w:p><w:r><w:t>The next paragraph explains the alarm driver.</w:t></w:r></w:p>
   </w:body>
 </w:document>""",
@@ -90,7 +95,7 @@ def make_docx_with_captioned_media(path):
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rIdBoard" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/board.png"/>
 </Relationships>""",
-        "word/media/board.png": b"\x89PNG\r\n\x1a\nfake",
+        "word/media/board.png": VALID_PNG_BYTES,
     }
     write_zip(path, files)
 
@@ -441,8 +446,8 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(rel["paragraph_index"], 3)
             self.assertEqual(rel["nearest_heading"], "Hardware Design")
             self.assertEqual(rel["nearby_text_before"], "The sensor board connects STM32 and OLED.")
-            self.assertEqual(rel["nearby_text_after"], "图3-1 系统硬件电路原理图")
-            self.assertEqual(rel["caption"], "图3-1 系统硬件电路原理图")
+            self.assertEqual(rel["nearby_text_after"], "Figure 3-1 System hardware circuit diagram")
+            self.assertEqual(rel["caption"], "Figure 3-1 System hardware circuit diagram")
 
     def test_docx_reader_uses_table_cell_paragraph_caption_for_media(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -456,7 +461,7 @@ class OfficeReaderTests(unittest.TestCase):
   <w:body>
     <w:tbl><w:tr><w:tc><w:p>
       <w:r><w:drawing><a:blip xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" r:embed="rIdChart"/></w:drawing></w:r>
-      <w:r><w:t>图5-1 系统整体仿真电路图</w:t></w:r>
+      <w:r><w:t>Figure 5-1 System simulation circuit diagram</w:t></w:r>
     </w:p></w:tc></w:tr></w:tbl>
   </w:body>
 </w:document>""",
@@ -464,7 +469,7 @@ class OfficeReaderTests(unittest.TestCase):
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rIdChart" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/chart.png"/>
 </Relationships>""",
-                "word/media/chart.png": b"\x89PNG\r\n\x1a\nfake",
+                "word/media/chart.png": VALID_PNG_BYTES,
             }
             write_zip(source, files)
 
@@ -472,7 +477,7 @@ class OfficeReaderTests(unittest.TestCase):
 
             manifest = json.loads((out_dir / "table-caption.manifest.json").read_text(encoding="utf-8"))
             rel = manifest["visual_findings"][0]["relationships"][0]
-            self.assertEqual(rel["caption"], "图5-1 系统整体仿真电路图")
+            self.assertEqual(rel["caption"], "Figure 5-1 System simulation circuit diagram")
             self.assertEqual(rel["table_index"], 1)
 
     def test_visual_analysis_fast_extracts_embedded_media_and_report_lists_context(self):
@@ -501,9 +506,16 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(manifest["visual_analysis"]["embedded_media_count"], 1)
             self.assertEqual(manifest["embedded_media"][0]["member"], "word/media/board.png")
             self.assertTrue(Path(manifest["embedded_media"][0]["path"]).exists())
+            self.assertEqual(manifest["embedded_media"][0]["contexts"][0]["caption"], "Figure 3-1 System hardware circuit diagram")
+            self.assertTrue(Path(manifest["artifacts"]["media_summary"]).exists())
+            self.assertTrue(Path(manifest["artifacts"]["media_contact_sheet"]).exists())
+            media_summary = json.loads(Path(manifest["artifacts"]["media_summary"]).read_text(encoding="utf-8"))
+            self.assertEqual(media_summary["items"][0]["label"], "Figure 3-1 System hardware circuit diagram")
             report = (out_dir / "captioned.report.md").read_text(encoding="utf-8")
             self.assertIn("Embedded Media", report)
-            self.assertIn("caption=图3-1 系统硬件电路原理图", report)
+            self.assertIn("caption=Figure 3-1 System hardware circuit diagram", report)
+            self.assertIn("Contact sheet:", report)
+            self.assertIn("Media summary:", report)
             self.assertIn("word/media/board.png", report)
 
     def test_docx_reader_extracts_headers_footers_footnotes_and_endnotes(self):
