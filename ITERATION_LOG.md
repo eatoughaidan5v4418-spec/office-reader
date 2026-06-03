@@ -1,5 +1,60 @@
 # Office Reader Iteration Log
 
+## 2026-06-03 - DOCX table semantic hints
+
+### Problems Found
+
+- DOCX tables only exposed raw rows and location metadata.
+- Reports could list table columns, but did not expose table captions, inferred headers, nearby explanatory context, or merged-cell signals.
+- Query mode could search raw table cells, but not table captions or surrounding context as separate evidence-bearing fields.
+
+### Changes Completed
+
+- Added DOCX table semantic extraction:
+  - `caption` from nearest preceding table-caption paragraph.
+  - `headers` inferred from the first row, or second row when the first row is a single merged title row.
+  - `nearby_text_before` and `nearby_text_after`.
+  - `merged_cells` for `w:gridSpan` and `w:vMerge`.
+- Updated Table Index and Evidence Index report output to show captions, headers, context, and merged-cell counts.
+- Added query candidates for table caption, headers, and nearby context.
+- Updated `SKILL.md` and `references/output_schema.md`.
+
+### Verification
+
+- TDD red test:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_table_semantics -v`
+  - Initial result: failed with missing `caption` metadata.
+- Focused tests after implementation:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_table_semantics tests.test_office_reader.OfficeReaderTests.test_report_assembler_evidence_mode_lists_source_locations tests.test_office_reader.OfficeReaderTests.test_unified_reader_query_writes_matches_to_manifest_report_and_stdout -v`
+  - Result: `OK`
+- Syntax check:
+  - `python -m py_compile scripts\read_docx.py scripts\assemble_report.py scripts\read_office.py tests\test_office_reader.py`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 42 tests
+- Real DOCX table semantics smoke:
+  - Source: `C:\Users\Huang\Desktop\CC\第十八届合泰杯复赛报告书_基于HT32的无感式智能体态与脊柱健康监测垫_终稿.docx`
+  - Command: `read_office.py ... --mode fast --query "表" --evidence-report --no-openai-vision`
+  - Output: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\table-semantics-round-20260603-ht32`
+  - Result: success
+  - Tables: `7`
+  - Tables with headers: `7`
+  - Tables with before/after context: `7/7`
+  - Tables with merged-cell signals: `4`
+  - Query matches: `24`
+  - Note: this real document did not expose table-caption paragraphs matching the caption heuristic; synthetic regression covers the table-caption path.
+
+### Remaining Risks
+
+- Header inference is heuristic and may be wrong for unusual multi-level table headers.
+- Vertical merge continuation text is not expanded across rows; `merged_cells` records the signal for downstream review.
+
+### Next Round Direction
+
+- Add legacy `.doc/.ppt` conversion timeout isolation and backend health memory, mirroring preview rendering protections.
+
 ## 2026-06-03 - Evidence index report mode
 
 ### Problems Found

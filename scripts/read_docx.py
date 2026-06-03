@@ -275,6 +275,74 @@ def best_table_caption(item: dict[str, Any], captions_by_table: dict[int, list[d
     return ""
 
 
+def is_table_caption_text(text: str) -> bool:
+    return bool(
+        re.match(
+            r"^\s*(?:\u8868|Table)\s*[\d\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341IVXivx\-\.]*",
+            text or "",
+            re.IGNORECASE,
+        )
+    )
+
+
+def table_headers(rows: list[list[str]]) -> list[str]:
+    if not rows:
+        return []
+    if len(rows) > 1 and len(rows[0]) == 1 and len(rows[1]) > 1:
+        return [str(cell).strip() for cell in rows[1] if str(cell).strip()]
+    return [str(cell).strip() for cell in rows[0] if str(cell).strip()]
+
+
+def merged_cells(table) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    for row_index, row in enumerate(table.findall("w:tr", NS), start=1):
+        for cell_index, cell in enumerate(row.findall("w:tc", NS), start=1):
+            props = cell.find("w:tcPr", NS)
+            if props is None:
+                continue
+            item: dict[str, Any] = {"row_index": row_index, "cell_index": cell_index}
+            grid_span = props.find("w:gridSpan", NS)
+            if grid_span is not None:
+                value = grid_span.attrib.get(W_VAL, "")
+                if value.isdigit() and int(value) > 1:
+                    item["grid_span"] = int(value)
+            v_merge = props.find("w:vMerge", NS)
+            if v_merge is not None:
+                item["v_merge"] = v_merge.attrib.get(W_VAL, "continue") or "continue"
+            if len(item) > 2:
+                merged.append(item)
+    return merged
+
+
+def enrich_table_entry(table_entry: dict[str, Any], table, structure: list[dict[str, Any]]) -> None:
+    rows = table_entry.get("rows", []) or []
+    before = str(structure[-1].get("text", "")).strip() if structure else ""
+    if before:
+        table_entry["nearby_text_before"] = before
+        if is_table_caption_text(before):
+            table_entry["caption"] = before
+    headers = table_headers(rows)
+    if headers:
+        table_entry["headers"] = headers
+    merged = merged_cells(table)
+    if merged:
+        table_entry["merged_cells"] = merged
+
+
+def add_table_after_context(tables: list[dict[str, Any]], structure: list[dict[str, Any]]) -> None:
+    ordered = [item for item in structure if item.get("index") and str(item.get("text", "")).strip()]
+    for table in tables:
+        before = str(table.get("nearby_text_before", "")).strip()
+        if not before:
+            continue
+        before_index = next((int(item["index"]) for item in ordered if str(item.get("text", "")).strip() == before), None)
+        if before_index is None:
+            continue
+        after = next((str(item.get("text", "")).strip() for item in ordered if int(item["index"]) > before_index), "")
+        if after:
+            table["nearby_text_after"] = after
+
+
 def nearest_structure_text(structure: list[dict[str, Any]], paragraph_index: int, direction: int) -> str:
     ordered = sorted(
         (item for item in structure if item.get("index") and str(item.get("text", "")).strip()),
@@ -467,6 +535,7 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                     rows = table_to_rows(child, "w:tc", "w:tr")
                     part_location = base_location(extra_location)
                     table_entry = {"index": table_index, "rows": rows, **part_location}
+                    enrich_table_entry(table_entry, child, manifest["structure"])
                     manifest["tables"].append(table_entry)
                     markdown.append(f"Table {table_index}")
                     markdown.append(markdown_table(rows))
@@ -530,6 +599,7 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
             else:
                 process_part(part_type, part_path, part_root, part_rels, f"{part_type.title()} {rel_id}".strip())
 
+        add_table_after_context(manifest["tables"], manifest["structure"])
         package_media = media_members(package, "word/media/")
         media_refs = add_media_context(media_refs, manifest["structure"], manifest["tables"])
         if package_media or media_refs:

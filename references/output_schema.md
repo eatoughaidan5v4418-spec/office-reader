@@ -13,7 +13,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `reading_mode`: `fast`, `balanced`, or `complete`.
 - `metadata`: package metadata from `docProps/core.xml` when present.
 - `structure`: paragraphs/headings for Word or ordered slides for PowerPoint. Word entries may include `part_type` and `part` for non-body sources such as headers, footers, footnotes, and endnotes, and `container` values such as `content_control` or `textbox` when text came from those containers.
-- `tables`: extracted table rows with document, slide, or Word part location.
+- `tables`: extracted table rows with document, slide, or Word part location. DOCX tables may also include `caption`, `headers`, `nearby_text_before`, `nearby_text_after`, and `merged_cells`.
 - `comments`: Word comments or PowerPoint comments. Word comments may include `anchor_text` when `commentRangeStart/commentRangeEnd` identifies the commented span. Word comments referenced inside a table cell may include `table_index`, `row_index`, `cell_index`, `part_type`, and `part`.
 - `revisions`: Word tracked insertions and deletions. Word revisions inside a table cell may include `table_index`, `row_index`, `cell_index`, `part_type`, and `part`.
 - `notes`: PowerPoint speaker notes.
@@ -68,6 +68,13 @@ When `read_office.py --evidence-report` or `assemble_report.py --evidence` is us
 For DOCX media relationships found in the body, a non-body Word part, a table cell, a block-level content control, or a textbox, entries under `visual_findings[].relationships` may include `part_type`, `part`, `container`, `table_index`, `row_index`, `cell_index`, `paragraph_index`, `paragraph_text`, `nearest_heading`, `nearby_text_before`, `nearby_text_after`, `media_source`, detected `caption`, `object_id`, `name`, `alt_text`, `title`, and `geometry`. `media_source` is usually `drawingml` for `a:blip` images or `vml` for older `v:imagedata`/OLE-style images such as embedded Visio EMF previews. DrawingML `geometry` records inline/anchor extent as EMU `cx`/`cy` when available; VML metadata may include shape ids and titles.
 
 DOCX table captions are matched from the same cell, same row, or nearest preceding caption row within the same table. This is intended for common Word layout tables where an image paragraph is separate from its figure-caption paragraph.
+
+DOCX table semantic fields:
+
+- `caption`: nearest preceding table caption paragraph such as `Table 2-1 ...` or Chinese `表...` when detected.
+- `headers`: inferred header cells, usually the first row, or the second row when the first row is a single merged title row.
+- `nearby_text_before` and `nearby_text_after`: closest surrounding structure text.
+- `merged_cells`: row/cell coordinates for `w:gridSpan` and `w:vMerge` cells, including `grid_span` or `v_merge` where present.
 
 `embedded_media[]` records are generated when package members under `word/media` or `ppt/media` are referenced. Fields:
 

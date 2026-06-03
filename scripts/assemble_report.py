@@ -75,9 +75,11 @@ def evidence_lines(manifest: dict[str, Any]) -> list[str]:
         lines.append(f"- {label} ({location_summary(item)}): {first_sentence(item.get('title') or item.get('text'), 220)}")
         count += 1
     for table in manifest.get("tables", [])[:40]:
-        preview = " | ".join(str(cell) for cell in (table.get("rows") or [[]])[0])
+        preview = " | ".join(str(cell) for cell in (table.get("headers") or (table.get("rows") or [[]])[0]))
         rows = len(table.get("rows", []) or [])
-        lines.append(f"- Table {table.get('index')} ({location_summary(table)}): {rows} rows; {first_sentence(preview, 180)}")
+        caption = f"; caption={first_sentence(table.get('caption'), 140)}" if table.get("caption") else ""
+        merged = f"; merged={len(table.get('merged_cells', []))}" if table.get("merged_cells") else ""
+        lines.append(f"- Table {table.get('index')} ({location_summary(table)}): {rows} rows; {first_sentence(preview, 180)}{caption}{merged}")
         count += 1
     for comment in manifest.get("comments", [])[:80]:
         label = f"Comment {comment.get('id')}" if comment.get("id") not in (None, "") else "Comment"
@@ -187,8 +189,14 @@ def build_report(manifest: dict[str, Any], include_evidence: bool = False) -> st
         for table in tables:
             location = f"slide {table.get('slide_index')}" if table.get("slide_index") else "document"
             row_count = len(table.get("rows", []))
-            preview = table.get("rows", [[]])[0] if table.get("rows") else []
-            lines.append(f"- Table {table.get('index')}: {location}, {row_count} rows, columns: {', '.join(preview)}")
+            preview = table.get("headers") or (table.get("rows", [[]])[0] if table.get("rows") else [])
+            caption = f", caption: {first_sentence(table.get('caption'), 120)}" if table.get("caption") else ""
+            merged = f", merged cells: {len(table.get('merged_cells', []))}" if table.get("merged_cells") else ""
+            lines.append(f"- Table {table.get('index')}: {location}, {row_count} rows, columns: {', '.join(preview)}{caption}{merged}")
+            if table.get("nearby_text_before") or table.get("nearby_text_after"):
+                lines.append(
+                    f"  Context: before={first_sentence(table.get('nearby_text_before'), 120)}; after={first_sentence(table.get('nearby_text_after'), 120)}"
+                )
     else:
         lines.append("- No tables extracted.")
     lines.append("")

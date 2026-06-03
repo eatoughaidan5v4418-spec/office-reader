@@ -517,6 +517,50 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(by_target["word/media/a.png"]["caption"], "Figure 5-6-1 Normal display test")
             self.assertEqual(by_target["word/media/b.png"]["caption"], "Figure 5-6-2 Normal display test")
 
+    def test_docx_reader_extracts_table_semantics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "semantic-table.docx"
+            out_dir = tmp_path / "out"
+            files = {
+                "word/document.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>System overview</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Table 2-1 Performance Metrics</w:t></w:r></w:p>
+    <w:tbl>
+      <w:tr>
+        <w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>Performance Summary</w:t></w:r></w:p></w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>Metric</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>Value</w:t></w:r></w:p></w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>Latency</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>12 ms</w:t></w:r></w:p></w:tc>
+      </w:tr>
+    </w:tbl>
+    <w:p><w:r><w:t>The latency result met the design target.</w:t></w:r></w:p>
+  </w:body>
+</w:document>""",
+            }
+            write_zip(source, files)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+
+            manifest = json.loads((out_dir / "semantic-table.manifest.json").read_text(encoding="utf-8"))
+            table = manifest["tables"][0]
+            self.assertEqual(table["caption"], "Table 2-1 Performance Metrics")
+            self.assertEqual(table["headers"], ["Metric", "Value"])
+            self.assertEqual(table["nearby_text_before"], "Table 2-1 Performance Metrics")
+            self.assertEqual(table["nearby_text_after"], "The latency result met the design target.")
+            self.assertEqual(table["merged_cells"], [{"row_index": 1, "cell_index": 1, "grid_span": 2}])
+            self.run_script("assemble_report.py", out_dir / "semantic-table.manifest.json")
+            report = (out_dir / "semantic-table.report.md").read_text(encoding="utf-8")
+            self.assertIn("caption: Table 2-1 Performance Metrics", report)
+            self.assertIn("merged cells: 1", report)
+
     def test_docx_reader_extracts_vml_imagedata_media_relationships(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

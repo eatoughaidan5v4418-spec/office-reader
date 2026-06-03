@@ -303,6 +303,10 @@ def query_candidates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                 "container": table.get("container"),
             }
             add_query_candidate(candidates, "table", location, " | ".join(str(cell) for cell in row))
+        add_query_candidate(candidates, "table_caption", {"table_index": table.get("index")}, table.get("caption"))
+        add_query_candidate(candidates, "table_headers", {"table_index": table.get("index")}, " | ".join(str(cell) for cell in table.get("headers", [])))
+        add_query_candidate(candidates, "table_context_before", {"table_index": table.get("index")}, table.get("nearby_text_before"))
+        add_query_candidate(candidates, "table_context_after", {"table_index": table.get("index")}, table.get("nearby_text_after"))
     for comment in manifest.get("comments", []):
         location = {
             "id": comment.get("id"),
