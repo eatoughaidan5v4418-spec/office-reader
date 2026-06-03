@@ -1104,6 +1104,46 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertIn("## Query Results", report)
             self.assertIn("ARR source", report)
 
+    def test_unified_reader_writes_review_items_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "board-memo.docx"
+            out_dir = tmp_path / "out"
+            make_docx(source)
+
+            proc = self.run_script(
+                "read_office.py",
+                source,
+                "--out-dir",
+                out_dir,
+                "--mode",
+                "fast",
+                "--no-openai-vision",
+            )
+
+            stdout = json.loads(proc.stdout)
+            self.assertIn("review_items", stdout)
+            review_path = Path(stdout["review_items"])
+            self.assertTrue(review_path.exists())
+            review = json.loads(review_path.read_text(encoding="utf-8"))
+            self.assertEqual(review["total_items"], 6)
+            self.assertEqual(review["counts"]["comments"], 2)
+            self.assertEqual(review["counts"]["revisions"], 4)
+            first_comment = next(item for item in review["items"] if item["kind"] == "comment" and item["comment_id"] == "0")
+            self.assertEqual(first_comment["text"], "Please verify the ARR source.")
+            self.assertEqual(first_comment["anchor_text"], "")
+            self.assertEqual(first_comment["location"]["paragraph_index"], 2)
+            table_revision = next(item for item in review["items"] if item["kind"] == "revision" and item["text"] == "verified")
+            self.assertEqual(table_revision["revision_type"], "insertion")
+            self.assertEqual(table_revision["location"]["table_index"], 1)
+            self.assertEqual(table_revision["location"]["row_index"], 2)
+            self.assertEqual(table_revision["location"]["cell_index"], 2)
+
+            manifest = json.loads((out_dir / "board-memo.manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["artifacts"]["review_items"], str(review_path))
+            report = (out_dir / "board-memo.report.md").read_text(encoding="utf-8")
+            self.assertIn("- Review items:", report)
+
     def test_unified_reader_evidence_report_forwards_to_report_assembler(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

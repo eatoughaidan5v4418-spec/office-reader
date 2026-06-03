@@ -2,7 +2,7 @@
 
 `office-reader` writes a manifest JSON file beside the Markdown transcript and report.
 
-The unified `scripts/read_office.py` command also prints a small JSON object to stdout with `full_markdown`, `manifest`, and `report` paths. When `--query` is used, stdout also includes `query_results`. Stdout/stderr are configured as UTF-8 so callers can decode output paths reliably when paths contain Chinese characters or spaces. PowerShell 5 callers should read generated JSON files with `-Encoding UTF8`.
+The unified `scripts/read_office.py` command also prints a small JSON object to stdout with `full_markdown`, `manifest`, and `report` paths. When comments or tracked revisions are extracted, stdout also includes `review_items`. When `--query` is used, stdout also includes `query_results`. Stdout/stderr are configured as UTF-8 so callers can decode output paths reliably when paths contain Chinese characters or spaces. PowerShell 5 callers should read generated JSON files with `-Encoding UTF8`.
 
 ## Top-Level Fields
 
@@ -22,7 +22,21 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 - `embedded_media`: extracted packaged media records with package member, extracted path, hash, content type, cache status, derived label, optional EMF PNG preview path, and optional context records.
 - `query`: present when `--query` is used. Contains the query string, normalized tokens, total match count, returned match excerpts, truncation flag, source type, and location metadata.
 - `completeness_score`: conservative extraction coverage score. It combines text coverage, table coverage, verified visual coverage, OCR coverage, OpenAI vision use, unverified visual count, and score signals.
-- `artifacts`: paths to generated `.full.md`, `.manifest.json`, and report files.
+- `artifacts`: paths to generated `.full.md`, `.manifest.json`, report, optional review-item, query, media, and preview files.
+
+## Review Items
+
+When comments or tracked revisions are extracted, `read_office.py` writes `<basename>.review-items.json`, records the path under `manifest.artifacts.review_items`, includes `review_items` in stdout, and lists it in the report artifacts.
+
+`<basename>.review-items.json` fields:
+
+- `source`: original source path/name copied from the manifest.
+- `document_type`: manifest document type.
+- `total_items`: total comments and revisions exported.
+- `counts`: comment and revision counts.
+- `items`: flat review queue. Comment items include `kind: "comment"`, `comment_id`, `author`, `date`, `text`, `anchor_text`, `location`, and `status: "open"`. Revision items include `kind: "revision"`, `revision_type`, `author`, `date`, `text`, `location`, and `status: "pending"`.
+
+`location` preserves available source coordinates such as paragraph, slide, table row/cell, Word part, and container.
 
 ## Query Results
 

@@ -20,6 +20,18 @@ def bullet(label: str, value: Any) -> str:
     return f"- {label}: {value}"
 
 
+def artifact_label(key: str) -> str:
+    labels = {
+        "full_markdown": "Full Markdown",
+        "query_results": "Query results",
+        "review_items": "Review items",
+        "media_contact_sheet": "Media contact sheet",
+        "media_summary": "Media summary",
+        "preview_pdf": "Preview PDF",
+    }
+    return labels.get(key, key.replace("_", " ").title())
+
+
 def visual_object_summary(item: dict[str, Any]) -> str:
     parts = [str(item.get("object_type", "object"))]
     if item.get("name"):
@@ -342,7 +354,7 @@ def build_report(manifest: dict[str, Any], include_evidence: bool = False) -> st
     artifacts = manifest.get("artifacts", {})
     lines.extend(["## Artifacts", ""])
     for key, value in artifacts.items():
-        lines.append(f"- {key}: {value}")
+        lines.append(f"- {artifact_label(key)}: {value}")
     if not artifacts:
         lines.append("- No artifacts recorded.")
     lines.append("")

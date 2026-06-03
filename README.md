@@ -7,6 +7,7 @@ It reads `.doc`, `.docx`, `.ppt`, and `.pptx` into:
 - `<basename>.full.md`
 - `<basename>.manifest.json`
 - `<basename>.report.md`
+- `<basename>.review-items.json` when comments or tracked revisions are present
 
 The default path is Microsoft Office COM first for legacy conversion, then optional WPS, then LibreOffice. Preview rendering uses Office COM when healthy and falls back to LibreOffice; slow or invalid COM preview runs are remembered in `.office-reader-cache/preview-backend-health.json`. Visual deep reading combines OOXML extraction, embedded media extraction, rendered page/slide analysis, local OCR, optional OpenAI vision, and cache reuse.
 
@@ -34,6 +35,8 @@ python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode bal
 Use `--mode fast` for simple lookup tasks such as finding a section, question, or keyword. For legacy `.doc` and `.ppt`, fast mode uses a text-only fallback first. If full legacy conversion fails in `balanced` or `complete`, the unified reader also falls back to searchable text artifacts and marks `conversion.status` as `text_fallback`.
 
 Use `--query "<text>"` with any mode to generate `<basename>.query.json`, add `manifest.query`, include `query_results` in stdout, and add a Query Results section to the report. Query mode searches extracted structure text, tables, comments, comment anchors, revisions, speaker notes, OCR/vision text fields, media context, and embedded-media labels.
+
+When comments or tracked revisions are present, `read_office.py` generates `<basename>.review-items.json`, records it in `manifest.artifacts.review_items`, and includes `review_items` in stdout. This flat artifact is intended for human review queues and downstream audit tools.
 
 Use `--media-ocr selected` to OCR selected extracted embedded images or EMF previews without rendering full pages. Use `--media-ocr all` to attempt every image-like extracted media item. Media OCR results are written to `embedded_media[].ocr_text`, `media_summary.json`, `visual_findings[]`, and the report, so `--query` can find text recovered from embedded images.
 

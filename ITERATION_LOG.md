@@ -1,5 +1,54 @@
 # Office Reader Iteration Log
 
+## 2026-06-03 - Review item export for comments and tracked revisions
+
+### Problems Found
+
+- Comments and tracked revisions were available in the manifest, report, evidence index, and query scan, but not as a flat review queue.
+- Downstream audit/review workflows had to parse the full manifest to collect comment and revision action items.
+- Report artifact labels exposed raw snake_case keys, making generated artifact lists less readable.
+
+### Changes Completed
+
+- Added `<basename>.review-items.json` generation in `read_office.py` whenever comments or tracked revisions are extracted.
+- Added `manifest.artifacts.review_items` and stdout `review_items` path output.
+- Review items include kind, text, author/date where available, status, and preserved source location such as paragraph, slide, table row/cell, Word part, and container.
+- Updated report artifact labels so `review_items` appears as `Review items`.
+- Updated `SKILL.md`, `README.md`, and `references/output_schema.md`.
+
+### Verification
+
+- TDD red test:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_unified_reader_writes_review_items_artifact -v`
+  - Initial result: failed because stdout did not include `review_items`.
+- Focused tests after implementation:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_unified_reader_writes_review_items_artifact tests.test_office_reader.OfficeReaderTests.test_unified_reader_query_writes_matches_to_manifest_report_and_stdout tests.test_office_reader.OfficeReaderTests.test_unified_reader_evidence_report_forwards_to_report_assembler tests.test_office_reader.OfficeReaderTests.test_report_assembler_uses_manifest_counts_and_outline -v`
+  - Result: `OK`
+- Syntax check:
+  - `python -m py_compile scripts\read_office.py scripts\assemble_report.py tests\test_office_reader.py`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 48 tests
+- Real DOCX smoke:
+  - Source: `C:\Users\Huang\Desktop\Proj\答辩\(黄曼)基于STM32多参数水质实时监测系统设计与实现 .docx`
+  - Command: `read_office.py ... --mode fast --no-openai-vision`
+  - Output: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\review-items-20260603-real-docx`
+  - Result: success
+  - Review items: `9`
+  - Comments: `9`
+  - Revisions: `0`
+  - Manifest artifact `review_items` matched stdout `review_items`.
+
+### Remaining Risks
+
+- Review item status values are export defaults (`open` for comments, `pending` for revisions); this skill does not yet track external review resolution state.
+
+### Next Round Direction
+
+- Add PowerPoint comment author/initial metadata when available.
+
 ## 2026-06-03 - Legacy conversion COM timeout and health memory
 
 ### Problems Found

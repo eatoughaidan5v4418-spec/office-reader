@@ -370,6 +370,75 @@ def query_candidates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return candidates
 
 
+def review_location(item: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "paragraph_index",
+        "slide_index",
+        "table_index",
+        "row_index",
+        "cell_index",
+        "part_type",
+        "part",
+        "container",
+    )
+    return {key: item.get(key) for key in keys if item.get(key) not in (None, "")}
+
+
+def review_items_for_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for index, comment in enumerate(manifest.get("comments", []), start=1):
+        items.append(
+            {
+                "id": f"comment-{comment.get('id', index)}",
+                "kind": "comment",
+                "comment_id": str(comment.get("id", "")),
+                "author": comment.get("author", ""),
+                "date": comment.get("date", ""),
+                "text": " ".join(str(comment.get("text", "")).split()),
+                "anchor_text": " ".join(str(comment.get("anchor_text", "")).split()),
+                "location": review_location(comment),
+                "status": "open",
+            }
+        )
+    for index, revision in enumerate(manifest.get("revisions", []), start=1):
+        revision_type = revision.get("type", "revision")
+        items.append(
+            {
+                "id": f"revision-{index}",
+                "kind": "revision",
+                "revision_type": revision_type,
+                "author": revision.get("author", ""),
+                "date": revision.get("date", ""),
+                "text": " ".join(str(revision.get("text", "")).split()),
+                "location": review_location(revision),
+                "status": "pending",
+            }
+        )
+    return items
+
+
+def write_review_items(manifest_path: Path) -> Path | None:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    items = review_items_for_manifest(manifest)
+    if not items:
+        return None
+    review_path = manifest_path.with_name(manifest_path.name.replace(".manifest.json", ".review-items.json"))
+    payload = {
+        "source": manifest.get("source", {}),
+        "document_type": manifest.get("document_type", ""),
+        "total_items": len(items),
+        "counts": {
+            "comments": sum(1 for item in items if item.get("kind") == "comment"),
+            "revisions": sum(1 for item in items if item.get("kind") == "revision"),
+        },
+        "items": items,
+    }
+    review_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest.setdefault("artifacts", {})["review_items"] = str(review_path)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return review_path
+
+
 def apply_query(manifest_path: Path, query: str, limit: int = 20) -> Path:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     tokens = query_tokens(query)
@@ -500,6 +569,7 @@ def main() -> int:
     conversion = None
     normalized = source
     query_path = None
+    review_path = None
     try:
         if args.install_missing_deps:
             bootstrap_deps(include_system_tools=args.install_system_tools)
@@ -507,6 +577,7 @@ def main() -> int:
             if args.mode == "fast":
                 extraction = extract_legacy_text(source, out_dir)
                 manifest_path = write_legacy_text_artifacts(source, out_dir, extraction, None, args.mode)
+                review_path = write_review_items(manifest_path)
                 if args.query:
                     query_path = apply_query(manifest_path, args.query, args.query_limit)
                 report_path = assemble_report(manifest_path, include_evidence=args.evidence_report)
@@ -516,6 +587,8 @@ def main() -> int:
                     "manifest": str(manifest_path),
                     "report": str(report_path),
                 }
+                if review_path:
+                    result["review_items"] = str(review_path)
                 if query_path:
                     result["query_results"] = str(query_path)
                 print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -530,6 +603,7 @@ def main() -> int:
                 conversion_failure = parse_conversion_error(conversion_exc)
                 extraction = extract_legacy_text(source, out_dir)
                 manifest_path = write_legacy_text_artifacts(source, out_dir, extraction, conversion_failure, args.mode)
+                review_path = write_review_items(manifest_path)
                 if args.query:
                     query_path = apply_query(manifest_path, args.query, args.query_limit)
                 report_path = assemble_report(manifest_path, include_evidence=args.evidence_report)
@@ -539,6 +613,8 @@ def main() -> int:
                     "manifest": str(manifest_path),
                     "report": str(report_path),
                 }
+                if review_path:
+                    result["review_items"] = str(review_path)
                 if query_path:
                     result["query_results"] = str(query_path)
                 print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -558,6 +634,7 @@ def main() -> int:
             timeout_seconds=args.visual_timeout_seconds,
             media_ocr=args.media_ocr,
         )
+        review_path = write_review_items(manifest_path)
         if args.query:
             query_path = apply_query(manifest_path, args.query, args.query_limit)
         report_path = assemble_report(manifest_path, include_evidence=args.evidence_report)
@@ -570,6 +647,8 @@ def main() -> int:
         "manifest": str(manifest_path),
         "report": str(report_path),
     }
+    if review_path:
+        result["review_items"] = str(review_path)
     if query_path:
         result["query_results"] = str(query_path)
     print(json.dumps(result, ensure_ascii=False, indent=2))
