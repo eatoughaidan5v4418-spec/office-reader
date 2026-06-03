@@ -40,6 +40,10 @@ The query scan covers extracted structure text, tables, comments, comment anchor
 
 Query results are lookup aids over already extracted text. They do not prove that unverified image-only content was OCR-read or visually understood.
 
+## Evidence Report
+
+When `read_office.py --evidence-report` or `assemble_report.py --evidence` is used, the report includes an `Evidence Index` section. The section lists source-backed manifest entries for structure, tables, comments, revisions, speaker notes, media relationships, visual object inventory records, and OCR findings. Each entry includes a compact location such as paragraph index, slide index, table row/cell, Word part, media target, or object relationship metadata when available.
+
 ## Revision Markers In Markdown
 
 - Insertions are rendered as `{+inserted text+}`.

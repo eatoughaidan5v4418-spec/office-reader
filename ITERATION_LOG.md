@@ -1,5 +1,54 @@
 # Office Reader Iteration Log
 
+## 2026-06-03 - Evidence index report mode
+
+### Problems Found
+
+- Structured reports summarized extracted content but did not provide a compact source-backed evidence index.
+- Callers reviewing summaries had to jump between manifest JSON sections to locate paragraph, table, comment, revision, media, visual object, and OCR evidence.
+- The unified reader had no single flag to request a source-location-heavy report.
+
+### Changes Completed
+
+- Added `assemble_report.py --evidence`.
+- Added `read_office.py --evidence-report` forwarding through the unified entrypoint.
+- Evidence Index includes structure, tables, comments, revisions, speaker notes, DOCX/PPTX media relationships, visual object inventory records, and OCR findings.
+- Evidence lines include compact locations such as paragraph index, slide index, table row/cell, Word part, media target, and object metadata when available.
+- Updated `SKILL.md`, `README.md`, and `references/output_schema.md`.
+
+### Verification
+
+- TDD red test:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_report_assembler_evidence_mode_lists_source_locations -v`
+  - Initial result: failed because `assemble_report.py` did not recognize `--evidence`.
+- Focused tests after implementation:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_report_assembler_evidence_mode_lists_source_locations tests.test_office_reader.OfficeReaderTests.test_unified_reader_evidence_report_forwards_to_report_assembler -v`
+  - Result: `OK`
+- Syntax check:
+  - `python -m py_compile scripts\assemble_report.py scripts\read_office.py tests\test_office_reader.py`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 41 tests
+- Real DOCX evidence smoke:
+  - Source: `C:\Users\Huang\Desktop\CC\第十八届合泰杯复赛报告书_基于HT32的无感式智能体态与脊柱健康监测垫_终稿.docx`
+  - Command: `read_office.py ... --mode fast --query "HT32" --evidence-report --no-openai-vision`
+  - Output: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\evidence-round-20260603-ht32`
+  - Result: success
+  - Evidence Index present: `yes`
+  - Evidence lines: `128`
+  - Sample evidence line: `Structure p8 ... 参赛编号:20260034 使用合泰芯片型号：HT32F52352`
+
+### Remaining Risks
+
+- Evidence Index is an index of extracted evidence, not an argument checker or citation verifier.
+- It lists compact excerpts and locations; users still need the full Markdown/manifest for long-form traceability.
+
+### Next Round Direction
+
+- Add stronger table semantics: captions, header detection, merged-cell signals, and nearby explanatory context.
+
 ## 2026-06-03 - DOCX image object metadata inventory
 
 ### Problems Found

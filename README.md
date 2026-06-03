@@ -24,6 +24,7 @@ python scripts\read_office.py C:\path\file.pptx --out-dir C:\path\out --mode com
 python scripts\read_office.py C:\path\legacy.doc --out-dir C:\path\out --mode fast
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode fast --query "ARR source"
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode fast --media-ocr selected --query "sensor"
+python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode balanced --evidence-report
 ```
 
 `read_office.py` configures stdout/stderr as UTF-8 and prints a small JSON object with generated paths. Automation should decode stdout as UTF-8; PowerShell 5 users should read manifest/report files with `-Encoding UTF8`.
@@ -33,6 +34,8 @@ Use `--mode fast` for simple lookup tasks such as finding a section, question, o
 Use `--query "<text>"` with any mode to generate `<basename>.query.json`, add `manifest.query`, include `query_results` in stdout, and add a Query Results section to the report. Query mode searches extracted structure text, tables, comments, comment anchors, revisions, speaker notes, OCR/vision text fields, media context, and embedded-media labels.
 
 Use `--media-ocr selected` to OCR selected extracted embedded images or EMF previews without rendering full pages. Use `--media-ocr all` to attempt every image-like extracted media item. Media OCR results are written to `embedded_media[].ocr_text`, `media_summary.json`, `visual_findings[]`, and the report, so `--query` can find text recovered from embedded images.
+
+Use `--evidence-report` to append an Evidence Index to the report. It lists source-backed entries from structure, tables, comments, revisions, speaker notes, media relationships, visual object inventory, and OCR findings with manifest locations.
 
 ## Dependencies
 

@@ -950,6 +950,51 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertIn("data_model=ppt/diagrams/data1.xml", report)
             self.assertIn("prog_id=Excel.Sheet.12", report)
 
+    def test_report_assembler_evidence_mode_lists_source_locations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            manifest_path = tmp_path / "sample.manifest.json"
+            report_path = tmp_path / "sample.report.md"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "source": {"path": "sample.docx", "name": "sample.docx"},
+                        "normalized_file": {"path": "sample.docx", "extension": ".docx"},
+                        "conversion": {"required": False, "backend": None, "status": "not_required"},
+                        "document_type": "docx",
+                        "structure": [
+                            {"type": "heading", "index": 1, "level": 1, "text": "Executive Summary", "part_type": "document", "part": "word/document.xml"},
+                            {"type": "paragraph", "index": 2, "text": "Revenue grew quickly.", "part_type": "document", "part": "word/document.xml"},
+                        ],
+                        "tables": [{"index": 1, "rows": [["Metric", "Value"], ["ARR", "$10M"]], "part_type": "document", "part": "word/document.xml"}],
+                        "comments": [{"id": "0", "paragraph_index": 2, "text": "Verify ARR source.", "anchor_text": "ARR"}],
+                        "revisions": [{"type": "insertion", "paragraph_index": 2, "text": "quickly"}],
+                        "notes": [],
+                        "visual_findings": [
+                            {
+                                "requires_visual_review": True,
+                                "reason": "document contains media",
+                                "relationships": [
+                                    {"target": "word/media/image1.png", "paragraph_index": 2, "caption": "Figure 1 Board", "name": "Board photo"}
+                                ],
+                            }
+                        ],
+                        "artifacts": {"full_markdown": "sample.full.md"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.run_script("assemble_report.py", manifest_path, "--out", report_path, "--evidence")
+
+            report = report_path.read_text(encoding="utf-8")
+            self.assertIn("## Evidence Index", report)
+            self.assertIn("Structure p2", report)
+            self.assertIn("Table 1", report)
+            self.assertIn("Comment 0", report)
+            self.assertIn("Revision insertion", report)
+            self.assertIn("Media word/media/image1.png", report)
+
     def test_backend_discovery_emits_json_shape(self):
         script = SCRIPTS_DIR / "discover_office_backends.ps1"
         proc = subprocess.run(
@@ -1014,6 +1059,29 @@ class OfficeReaderTests(unittest.TestCase):
             report = (out_dir / "board-memo.report.md").read_text(encoding="utf-8")
             self.assertIn("## Query Results", report)
             self.assertIn("ARR source", report)
+
+    def test_unified_reader_evidence_report_forwards_to_report_assembler(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "board-memo.docx"
+            out_dir = tmp_path / "out"
+            make_docx(source)
+
+            self.run_script(
+                "read_office.py",
+                source,
+                "--out-dir",
+                out_dir,
+                "--mode",
+                "fast",
+                "--evidence-report",
+                "--no-openai-vision",
+            )
+
+            report = (out_dir / "board-memo.report.md").read_text(encoding="utf-8")
+            self.assertIn("## Evidence Index", report)
+            self.assertIn("Comment 0", report)
+            self.assertIn("Media word/media/image1.png", report)
 
     def test_unified_reader_stdout_json_is_utf8_safe_for_chinese_paths(self):
         with tempfile.TemporaryDirectory(prefix="office-reader-") as tmp:

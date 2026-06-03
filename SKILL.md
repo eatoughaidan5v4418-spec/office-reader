@@ -31,6 +31,8 @@ Use `--query "<text>"` with any mode to write a focused `<basename>.query.json` 
 
 Use `--media-ocr selected` to OCR selected extracted embedded images/EMF previews without rendering every page. Use `--media-ocr all` when every extracted image-like media item should be attempted. Media OCR writes `ocr_text`/`ocr_backend` to `embedded_media[]`, `media_summary.json`, and the report, and adds `embedded_media_ocr` visual findings that query mode can search.
 
+Use `--evidence-report` when the user needs source-backed reading. It appends an Evidence Index to the report with paragraph, table, comment, revision, speaker-note, media, visual-object, and OCR entries plus their manifest locations.
+
 Use `--no-openai-vision` when cloud visual analysis is not allowed. Without `OPENAI_API_KEY`, local OCR still runs when available and the report clearly lists remaining visual gaps.
 
 ## Dependency Bootstrap
@@ -92,6 +94,7 @@ The default preview health file is `.office-reader-cache/preview-backend-health.
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode balanced
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode fast --query "experiment eight"
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode fast --media-ocr selected --query "sensor"
+python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode balanced --evidence-report
 python scripts\read_office.py C:\path\file.pptx --out-dir C:\path\out --mode complete
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode balanced --no-openai-vision
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\bootstrap_deps.ps1 -DryRun -IncludeSystemTools

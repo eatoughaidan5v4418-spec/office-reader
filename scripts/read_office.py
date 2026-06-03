@@ -246,8 +246,11 @@ def run_reader(normalized: Path, out_dir: Path) -> Path:
     return manifest_path
 
 
-def assemble_report(manifest_path: Path) -> Path:
-    proc = run_command([sys.executable, str(SCRIPT_DIR / "assemble_report.py"), str(manifest_path)])
+def assemble_report(manifest_path: Path, include_evidence: bool = False) -> Path:
+    command = [sys.executable, str(SCRIPT_DIR / "assemble_report.py"), str(manifest_path)]
+    if include_evidence:
+        command.append("--evidence")
+    proc = run_command(command)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or proc.stdout.strip())
     report_path = Path(proc.stdout.strip().splitlines()[-1])
@@ -472,6 +475,7 @@ def main() -> int:
     parser.add_argument("--query", default=None, help="Write a query-results artifact for a quick text lookup.")
     parser.add_argument("--query-limit", type=int, default=20, help="Maximum query matches to include in the artifact.")
     parser.add_argument("--media-ocr", choices=["off", "selected", "all"], default="off")
+    parser.add_argument("--evidence-report", action="store_true", help="Append an evidence index to the report.")
     args = parser.parse_args()
 
     source = args.source.resolve()
@@ -494,7 +498,7 @@ def main() -> int:
                 manifest_path = write_legacy_text_artifacts(source, out_dir, extraction, None, args.mode)
                 if args.query:
                     query_path = apply_query(manifest_path, args.query, args.query_limit)
-                report_path = assemble_report(manifest_path)
+                report_path = assemble_report(manifest_path, include_evidence=args.evidence_report)
                 normalized = Path(extraction.get("output_path", source)).resolve()
                 result = {
                     "full_markdown": str(out_dir / f"{source.stem}.full.md"),
@@ -517,7 +521,7 @@ def main() -> int:
                 manifest_path = write_legacy_text_artifacts(source, out_dir, extraction, conversion_failure, args.mode)
                 if args.query:
                     query_path = apply_query(manifest_path, args.query, args.query_limit)
-                report_path = assemble_report(manifest_path)
+                report_path = assemble_report(manifest_path, include_evidence=args.evidence_report)
                 normalized = Path(extraction.get("output_path", source)).resolve()
                 result = {
                     "full_markdown": str(out_dir / f"{source.stem}.full.md"),
@@ -545,7 +549,7 @@ def main() -> int:
         )
         if args.query:
             query_path = apply_query(manifest_path, args.query, args.query_limit)
-        report_path = assemble_report(manifest_path)
+        report_path = assemble_report(manifest_path, include_evidence=args.evidence_report)
     except Exception as exc:
         print(str(exc), file=sys.stderr)
         return 1

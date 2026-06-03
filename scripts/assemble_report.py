@@ -48,7 +48,68 @@ def visual_object_summary(item: dict[str, Any]) -> str:
     return "; ".join(parts)
 
 
-def build_report(manifest: dict[str, Any]) -> str:
+def location_summary(item: dict[str, Any]) -> str:
+    parts = []
+    if item.get("slide_index"):
+        parts.append(f"slide {item.get('slide_index')}")
+    if item.get("paragraph_index"):
+        parts.append(f"p{item.get('paragraph_index')}")
+    if item.get("table_index"):
+        table = f"table {item.get('table_index')}"
+        if item.get("row_index"):
+            table += f" row {item.get('row_index')}"
+        if item.get("cell_index"):
+            table += f" cell {item.get('cell_index')}"
+        parts.append(table)
+    if item.get("part_type") or item.get("part"):
+        part = "/".join(str(value) for value in (item.get("part_type"), item.get("part")) if value)
+        parts.append(part)
+    return "; ".join(parts) if parts else "document"
+
+
+def evidence_lines(manifest: dict[str, Any]) -> list[str]:
+    lines = ["## Evidence Index", ""]
+    count = 0
+    for item in manifest.get("structure", [])[:80]:
+        label = f"Structure p{item.get('index')}" if item.get("index") else "Structure"
+        lines.append(f"- {label} ({location_summary(item)}): {first_sentence(item.get('title') or item.get('text'), 220)}")
+        count += 1
+    for table in manifest.get("tables", [])[:40]:
+        preview = " | ".join(str(cell) for cell in (table.get("rows") or [[]])[0])
+        rows = len(table.get("rows", []) or [])
+        lines.append(f"- Table {table.get('index')} ({location_summary(table)}): {rows} rows; {first_sentence(preview, 180)}")
+        count += 1
+    for comment in manifest.get("comments", [])[:80]:
+        label = f"Comment {comment.get('id')}" if comment.get("id") not in (None, "") else "Comment"
+        anchor = f" on {first_sentence(comment.get('anchor_text'), 100)}" if comment.get("anchor_text") else ""
+        lines.append(f"- {label} ({location_summary(comment)}){anchor}: {first_sentence(comment.get('text'), 220)}")
+        count += 1
+    for revision in manifest.get("revisions", [])[:80]:
+        lines.append(f"- Revision {revision.get('type', 'change')} ({location_summary(revision)}): {first_sentence(revision.get('text'), 220)}")
+        count += 1
+    for note in manifest.get("notes", [])[:80]:
+        lines.append(f"- Speaker note ({location_summary(note)}): {first_sentence(note.get('text'), 220)}")
+        count += 1
+    for finding in manifest.get("visual_findings", [])[:80]:
+        for rel in finding.get("relationships", [])[:40]:
+            label = rel.get("target") or rel.get("relationship_id") or "media"
+            context = rel.get("caption") or rel.get("alt_text") or rel.get("title") or rel.get("name") or finding.get("reason", "")
+            lines.append(f"- Media {label} ({location_summary(rel)}): {first_sentence(context, 220)}")
+            count += 1
+        for obj in finding.get("objects", [])[:40]:
+            label = obj.get("target") or obj.get("relationship_id") or obj.get("object_type") or "object"
+            lines.append(f"- Visual object {label} ({location_summary(obj)}): {visual_object_summary(obj)}")
+            count += 1
+        if finding.get("ocr_text"):
+            lines.append(f"- OCR finding ({location_summary(finding)}): {first_sentence(finding.get('ocr_text'), 220)}")
+            count += 1
+    if count == 0:
+        lines.append("- No evidence-bearing manifest entries were recorded.")
+    lines.append("")
+    return lines
+
+
+def build_report(manifest: dict[str, Any], include_evidence: bool = False) -> str:
     source = manifest.get("source", {})
     name = source.get("name") or Path(source.get("path", "document")).name
     structure = manifest.get("structure", [])
@@ -267,6 +328,9 @@ def build_report(manifest: dict[str, Any]) -> str:
     lines.extend(f"- {risk}" for risk in risks)
     lines.append("")
 
+    if include_evidence:
+        lines.extend(evidence_lines(manifest))
+
     artifacts = manifest.get("artifacts", {})
     lines.extend(["## Artifacts", ""])
     for key, value in artifacts.items():
@@ -281,10 +345,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build a structured report from an office-reader manifest.")
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--evidence", action="store_true", help="Append an evidence index with source locations.")
     args = parser.parse_args()
 
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    report = build_report(manifest)
+    report = build_report(manifest, include_evidence=args.evidence)
     out = args.out or args.manifest.with_name(args.manifest.name.replace(".manifest.json", ".report.md"))
     out.write_text(report, encoding="utf-8")
     print(str(out))
