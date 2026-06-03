@@ -1,5 +1,64 @@
 # Office Reader Iteration Log
 
+## 2026-06-03 - DOCX image object metadata inventory
+
+### Problems Found
+
+- DOCX media relationships carried useful location and caption context, but modern DrawingML object metadata was not exposed.
+- Word image alt text, object name/title, object id, and inline/anchor extent were invisible to manifest consumers.
+- VML/EMF preview relationships exposed `media_source: vml`, but not shape id/title metadata.
+
+### Changes Completed
+
+- Added DrawingML image metadata extraction from `wp:inline` / `wp:anchor`:
+  - `object_id`
+  - `name`
+  - `alt_text`
+  - `title`
+  - `geometry` with EMU `cx`/`cy` extent when available.
+- Added fallback picture metadata extraction from `pic:cNvPr`.
+- Added VML shape metadata extraction for object id/name/title when available.
+- Propagated new context fields into embedded media contexts, media summary labels, query candidates, and report media context lines.
+- Updated `SKILL.md` and `references/output_schema.md`.
+
+### Verification
+
+- TDD red test:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_drawingml_image_metadata -v`
+  - Initial result: failed with missing `name` metadata.
+- Focused tests after implementation:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_vml_imagedata_media_relationships tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_drawingml_image_metadata -v`
+  - Result: `OK`
+- Syntax check:
+  - `python -m py_compile scripts\read_docx.py scripts\visual_analysis.py scripts\read_office.py scripts\assemble_report.py scripts\common_ooxml.py tests\test_office_reader.py`
+  - Result: `OK`
+- Focused regression set:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_vml_imagedata_media_relationships tests.test_office_reader.OfficeReaderTests.test_docx_reader_extracts_drawingml_image_metadata tests.test_office_reader.OfficeReaderTests.test_visual_analysis_fast_extracts_embedded_media_and_report_lists_context -v`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 39 tests
+- Real DOCX metadata smoke:
+  - Source: `C:\Users\Huang\Desktop\CC\第十八届合泰杯复赛报告书_基于HT32的无感式智能体态与脊柱健康监测垫_终稿.docx`
+  - Command: `read_office.py ... --mode fast --query "HT32" --no-openai-vision`
+  - Output: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\docx-metadata-round-20260603-ht32`
+  - Result: success
+  - DOCX media relationships: `6`
+  - Relationships with `name`: `6`
+  - Relationships with `geometry`: `6`
+  - Query matches: `23`
+  - Embedded media extracted: `6`
+
+### Remaining Risks
+
+- DOCX shape crop, rotation, wrap mode, z-order, and absolute position are not modeled yet.
+- Complex embedded OLE/Visio object internals are still represented through preview media metadata, not parsed semantically.
+
+### Next Round Direction
+
+- Add evidence-style report mode that ties summaries/findings to paragraph, table, slide, media, comment, and revision locations.
+
 ## 2026-06-03 - Fast embedded media OCR option
 
 ### Problems Found

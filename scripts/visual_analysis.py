@@ -257,9 +257,11 @@ def media_context_map(manifest: dict[str, Any]) -> dict[str, list[dict[str, Any]
         "caption",
         "slide_index",
         "object_type",
+        "object_id",
         "name",
         "alt_text",
         "title",
+        "geometry",
     }
     for finding in manifest.get("visual_findings", []) or []:
         for rel in finding.get("relationships", []) or []:

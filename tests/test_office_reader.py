@@ -528,7 +528,7 @@ class OfficeReaderTests(unittest.TestCase):
             xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
             xmlns:v="urn:schemas-microsoft-com:vml">
   <w:body>
-    <w:p><w:r><w:object><v:shape id="_x0000_i1025" type="#_x0000_t75"><v:imagedata r:id="rIdVisio" o:title="" xmlns:o="urn:schemas-microsoft-com:office:office"/></v:shape></w:object></w:r></w:p>
+    <w:p><w:r><w:object><v:shape id="_x0000_i1025" type="#_x0000_t75"><v:imagedata r:id="rIdVisio" o:title="Visio preview" xmlns:o="urn:schemas-microsoft-com:office:office"/></v:shape></w:object></w:r></w:p>
     <w:p><w:r><w:t>Figure 4-1 Visio flowchart</w:t></w:r></w:p>
   </w:body>
 </w:document>""",
@@ -547,7 +547,54 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(rel["target"], "word/media/visio.emf")
             self.assertEqual(rel["relationship_id"], "rIdVisio")
             self.assertEqual(rel["media_source"], "vml")
+            self.assertEqual(rel["object_id"], "_x0000_i1025")
+            self.assertEqual(rel["name"], "_x0000_i1025")
+            self.assertEqual(rel["title"], "Visio preview")
             self.assertEqual(rel["caption"], "Figure 4-1 Visio flowchart")
+
+    def test_docx_reader_extracts_drawingml_image_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "image-metadata.docx"
+            out_dir = tmp_path / "out"
+            files = {
+                "word/document.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+            xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:p><w:r><w:drawing><wp:inline>
+      <wp:extent cx="1828800" cy="914400"/>
+      <wp:docPr id="4" name="Sensor board photo" descr="STM32 sensor board close-up" title="Board detail"/>
+      <a:graphic><a:graphicData>
+        <pic:pic>
+          <pic:nvPicPr><pic:cNvPr id="5" name="Board bitmap" descr="Fallback board description" title="Fallback title"/></pic:nvPicPr>
+          <pic:blipFill><a:blip r:embed="rIdBoard"/></pic:blipFill>
+        </pic:pic>
+      </a:graphicData></a:graphic>
+    </wp:inline></w:drawing></w:r></w:p>
+  </w:body>
+</w:document>""",
+                "word/_rels/document.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdBoard" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/board.png"/>
+</Relationships>""",
+                "word/media/board.png": VALID_PNG_BYTES,
+            }
+            write_zip(source, files)
+
+            self.run_script("read_docx.py", source, "--out-dir", out_dir)
+
+            manifest = json.loads((out_dir / "image-metadata.manifest.json").read_text(encoding="utf-8"))
+            rel = manifest["visual_findings"][0]["relationships"][0]
+            self.assertEqual(rel["relationship_id"], "rIdBoard")
+            self.assertEqual(rel["name"], "Sensor board photo")
+            self.assertEqual(rel["alt_text"], "STM32 sensor board close-up")
+            self.assertEqual(rel["title"], "Board detail")
+            self.assertEqual(rel["object_id"], "4")
+            self.assertEqual(rel["geometry"], {"cx": 1828800, "cy": 914400})
 
     def test_visual_analysis_fast_extracts_embedded_media_and_report_lists_context(self):
         with tempfile.TemporaryDirectory() as tmp:

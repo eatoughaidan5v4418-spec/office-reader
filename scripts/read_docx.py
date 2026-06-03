@@ -33,6 +33,7 @@ from common_ooxml import (
 
 TEXTBOX_SKIP_NAMES = {"txbxContent"}
 VML_IMAGE_REL_ID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+VML_TITLE = "{urn:schemas-microsoft-com:office:office}title"
 
 
 def heading_level(paragraph) -> int | None:
@@ -116,16 +117,88 @@ def iter_blips(element, skip_subtree_names: set[str] | None = None):
             yield node
 
 
-def iter_media_relationship_ids(element, skip_subtree_names: set[str] | None = None):
+def ancestor_chain(root, target) -> list[Any]:
+    path: list[Any] = []
+
+    def walk(node, current: list[Any]) -> bool:
+        if node is target:
+            path.extend([*current, node])
+            return True
+        for child in list(node):
+            if walk(child, [*current, node]):
+                return True
+        return False
+
+    walk(root, [])
+    return path
+
+
+def drawingml_metadata(root, blip) -> dict[str, Any]:
+    chain = ancestor_chain(root, blip)
+    metadata: dict[str, Any] = {}
+    for node in reversed(chain):
+        if node.tag in {qn("wp", "inline"), qn("wp", "anchor")}:
+            extent = node.find("wp:extent", NS)
+            if extent is not None:
+                geometry = {}
+                for key in ("cx", "cy"):
+                    value = extent.attrib.get(key)
+                    if value and value.isdigit():
+                        geometry[key] = int(value)
+                if geometry:
+                    metadata["geometry"] = geometry
+            doc_pr = node.find("wp:docPr", NS)
+            if doc_pr is not None:
+                if doc_pr.attrib.get("id"):
+                    metadata["object_id"] = doc_pr.attrib.get("id")
+                if doc_pr.attrib.get("name"):
+                    metadata["name"] = doc_pr.attrib.get("name")
+                if doc_pr.attrib.get("descr"):
+                    metadata["alt_text"] = doc_pr.attrib.get("descr")
+                if doc_pr.attrib.get("title"):
+                    metadata["title"] = doc_pr.attrib.get("title")
+            break
+    for node in reversed(chain):
+        if node.tag == qn("pic", "pic"):
+            c_nv_pr = node.find("pic:nvPicPr/pic:cNvPr", NS)
+            if c_nv_pr is not None:
+                metadata.setdefault("object_id", c_nv_pr.attrib.get("id", ""))
+                metadata.setdefault("name", c_nv_pr.attrib.get("name", ""))
+                metadata.setdefault("alt_text", c_nv_pr.attrib.get("descr", ""))
+                metadata.setdefault("title", c_nv_pr.attrib.get("title", ""))
+            break
+    return {key: value for key, value in metadata.items() if value not in ("", {}, None)}
+
+
+def vml_metadata(root, image_data) -> dict[str, Any]:
+    chain = ancestor_chain(root, image_data)
+    metadata: dict[str, Any] = {}
+    title = image_data.attrib.get(VML_TITLE, "")
+    if title:
+        metadata["title"] = title
+    for node in reversed(chain):
+        if local_name(node.tag) == "shape":
+            if node.attrib.get("id"):
+                metadata["object_id"] = node.attrib.get("id")
+                metadata.setdefault("name", node.attrib.get("id", ""))
+            if node.attrib.get("title"):
+                metadata.setdefault("title", node.attrib.get("title", ""))
+            if node.attrib.get("alt"):
+                metadata["alt_text"] = node.attrib.get("alt", "")
+            break
+    return {key: value for key, value in metadata.items() if value not in ("", {}, None)}
+
+
+def iter_media_relationships(element, skip_subtree_names: set[str] | None = None):
     for node in iter_without_subtrees(element, skip_subtree_names or set()):
         if node.tag == qn("a", "blip"):
             rel_id = node.attrib.get(R_EMBED)
             if rel_id:
-                yield rel_id, "drawingml"
+                yield {"relationship_id": rel_id, "media_source": "drawingml", **drawingml_metadata(element, node)}
         elif local_name(node.tag) == "imagedata":
             rel_id = node.attrib.get(VML_IMAGE_REL_ID)
             if rel_id:
-                yield rel_id, "vml"
+                yield {"relationship_id": rel_id, "media_source": "vml", **vml_metadata(element, node)}
 
 
 def table_cell_location(table_index: int, row_index: int, cell_index: int) -> dict[str, int]:
@@ -336,7 +409,7 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                 tag = child.tag
                 if tag == qn("w", "p"):
                     text, revisions = paragraph_text_with_revisions(child, skip_subtree_names=skip_names)
-                    media_relationships = list(iter_media_relationship_ids(child, skip_subtree_names=skip_names))
+                    media_relationships = list(iter_media_relationships(child, skip_subtree_names=skip_names))
                     if not text and not media_relationships:
                         pass
                     else:
@@ -371,13 +444,13 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                                     comment["anchor_text"] = anchors[ref_id]
                                 markdown.append(f"> Comment {ref_id}: {comment['text']}")
 
-                        for rel_id, media_source in media_relationships:
+                        for media_relationship in media_relationships:
+                            rel_id = media_relationship.get("relationship_id")
                             target = resolved_relationship_target(part_path, part_rels, rel_id)
                             if target:
                                 media_refs.append(
                                     {
-                                        "relationship_id": rel_id,
-                                        "media_source": media_source,
+                                        **media_relationship,
                                         "target": target,
                                         "paragraph_index": paragraph_index,
                                         "paragraph_text": text,
@@ -412,13 +485,13 @@ def extract_docx(source: Path, out_dir: Path) -> tuple[dict[str, Any], str]:
                                         comment.update(location)
                                         if anchors.get(ref_id):
                                             comment["anchor_text"] = anchors[ref_id]
-                                for rel_id, media_source in iter_media_relationship_ids(paragraph, skip_subtree_names=TEXTBOX_SKIP_NAMES):
+                                for media_relationship in iter_media_relationships(paragraph, skip_subtree_names=TEXTBOX_SKIP_NAMES):
+                                    rel_id = media_relationship.get("relationship_id")
                                     target = resolved_relationship_target(part_path, part_rels, rel_id)
                                     if target:
                                         media_refs.append(
                                             {
-                                                "relationship_id": rel_id,
-                                                "media_source": media_source,
+                                                **media_relationship,
                                                 "target": target,
                                                 "paragraph_text": _text,
                                                 **location,

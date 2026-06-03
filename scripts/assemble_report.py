@@ -173,6 +173,15 @@ def build_report(manifest: dict[str, Any]) -> str:
                     detail.append(f"target={rel.get('target')}")
                 if rel.get("caption"):
                     detail.append(f"caption={first_sentence(rel.get('caption'), 120)}")
+                if rel.get("name"):
+                    detail.append(f"name={first_sentence(rel.get('name'), 80)}")
+                if rel.get("alt_text"):
+                    detail.append(f"alt={first_sentence(rel.get('alt_text'), 120)}")
+                if rel.get("title"):
+                    detail.append(f"title={first_sentence(rel.get('title'), 80)}")
+                if rel.get("geometry"):
+                    geometry = rel.get("geometry", {})
+                    detail.append("geometry=" + ",".join(str(geometry.get(key, "")) for key in ("x", "y", "cx", "cy")))
                 if rel.get("nearest_heading"):
                     detail.append(f"section={first_sentence(rel.get('nearest_heading'), 120)}")
                 if rel.get("nearby_text_before"):

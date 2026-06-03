@@ -348,7 +348,7 @@ def query_candidates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                 "part": rel.get("part"),
                 "container": rel.get("container"),
             }
-            for key in ("caption", "paragraph_text", "nearest_heading", "nearby_text_before", "nearby_text_after", "alt_text", "title", "name"):
+            for key in ("caption", "paragraph_text", "nearest_heading", "nearby_text_before", "nearby_text_after", "alt_text", "title", "name", "object_id", "geometry"):
                 add_query_candidate(candidates, f"media_{key}", rel_location, rel.get(key))
     for item in manifest.get("embedded_media", []):
         location = {"member": item.get("member"), "path": item.get("path")}

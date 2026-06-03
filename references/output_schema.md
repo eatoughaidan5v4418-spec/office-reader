@@ -61,7 +61,7 @@ Query results are lookup aids over already extracted text. They do not prove tha
 - `duration_ms`: elapsed time for this item.
 - `cache_hit`: whether this result came from `.office-reader-cache`.
 
-For DOCX media relationships found in the body, a non-body Word part, a table cell, a block-level content control, or a textbox, entries under `visual_findings[].relationships` may include `part_type`, `part`, `container`, `table_index`, `row_index`, `cell_index`, `paragraph_index`, `paragraph_text`, `nearest_heading`, `nearby_text_before`, `nearby_text_after`, `media_source`, and detected `caption`. `media_source` is usually `drawingml` for `a:blip` images or `vml` for older `v:imagedata`/OLE-style images such as embedded Visio EMF previews.
+For DOCX media relationships found in the body, a non-body Word part, a table cell, a block-level content control, or a textbox, entries under `visual_findings[].relationships` may include `part_type`, `part`, `container`, `table_index`, `row_index`, `cell_index`, `paragraph_index`, `paragraph_text`, `nearest_heading`, `nearby_text_before`, `nearby_text_after`, `media_source`, detected `caption`, `object_id`, `name`, `alt_text`, `title`, and `geometry`. `media_source` is usually `drawingml` for `a:blip` images or `vml` for older `v:imagedata`/OLE-style images such as embedded Visio EMF previews. DrawingML `geometry` records inline/anchor extent as EMU `cx`/`cy` when available; VML metadata may include shape ids and titles.
 
 DOCX table captions are matched from the same cell, same row, or nearest preceding caption row within the same table. This is intended for common Word layout tables where an image paragraph is separate from its figure-caption paragraph.
 
