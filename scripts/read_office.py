@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +24,16 @@ def run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def conversion_script_path() -> Path:
+    override = os.environ.get("OFFICE_READER_CONVERT_LEGACY_SCRIPT")
+    return Path(override) if override else SCRIPT_DIR / "convert_legacy_office.ps1"
+
+
+def legacy_text_script_path() -> Path:
+    override = os.environ.get("OFFICE_READER_LEGACY_TEXT_EXTRACTOR")
+    return Path(override) if override else SCRIPT_DIR / "extract_legacy_text.ps1"
+
+
 def convert_legacy(source: Path, out_dir: Path) -> dict:
     proc = run_command(
         [
@@ -31,7 +42,7 @@ def convert_legacy(source: Path, out_dir: Path) -> dict:
             "-ExecutionPolicy",
             "Bypass",
             "-File",
-            str(SCRIPT_DIR / "convert_legacy_office.ps1"),
+            str(conversion_script_path()),
             "-InputPath",
             str(source),
             "-OutputDir",
@@ -51,6 +62,142 @@ def convert_legacy(source: Path, out_dir: Path) -> dict:
     if proc.returncode != 0:
         raise RuntimeError(json.dumps(result, ensure_ascii=True, indent=2))
     return result
+
+
+def parse_conversion_error(exc: Exception) -> dict:
+    try:
+        return json.loads(str(exc))
+    except json.JSONDecodeError:
+        return {
+            "required": True,
+            "status": "failed",
+            "backend": "",
+            "output_path": "",
+            "messages": [str(exc)],
+        }
+
+
+def extract_legacy_text(source: Path, out_dir: Path) -> dict:
+    text_path = out_dir / f"{source.stem}.legacy-text.txt"
+    proc = run_command(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(legacy_text_script_path()),
+            "-InputPath",
+            str(source),
+            "-OutputPath",
+            str(text_path),
+        ]
+    )
+    try:
+        result = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        result = {
+            "status": "failed",
+            "backend": "",
+            "output_path": "",
+            "messages": [proc.stderr.strip() or proc.stdout.strip() or "Legacy text extraction failed without JSON output."],
+        }
+    if proc.returncode != 0 or result.get("status") != "success":
+        raise RuntimeError(json.dumps(result, ensure_ascii=True, indent=2))
+    return result
+
+
+def legacy_text_completeness(structure: list[dict], visual_required: bool) -> dict:
+    text_coverage = 100 if structure else 0
+    visual_coverage = 0 if visual_required else 100
+    ocr_confidence = 0 if visual_required else 100
+    unverified = 1 if visual_required else 0
+    signals = [
+        "Legacy binary Office file was read through a text-only fallback.",
+        "Tables, comments, revisions, media, and layout may be incomplete until conversion succeeds.",
+    ]
+    if visual_required:
+        signals.append("Visual content was not rendered or OCR-verified in legacy text fallback.")
+    overall = round((text_coverage * 0.35) + (100 * 0.15) + (visual_coverage * 0.40) + (ocr_confidence * 0.10))
+    return {
+        "overall": max(0, min(100, int(overall))),
+        "text_coverage": text_coverage,
+        "table_coverage": 100,
+        "visual_coverage": visual_coverage,
+        "ocr_confidence": ocr_confidence,
+        "openai_vision_enabled": False,
+        "unverified_visual_count": unverified,
+        "signals": signals,
+    }
+
+
+def write_legacy_text_artifacts(source: Path, out_dir: Path, extraction: dict, conversion: dict | None, mode: str) -> Path:
+    text_path = Path(extraction.get("output_path", ""))
+    text = text_path.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff") if text_path.exists() else ""
+    lines = [line.strip() for line in text.replace("\r", "\n").split("\n")]
+    paragraphs = [line for line in lines if line]
+    structure = [
+        {
+            "type": "paragraph",
+            "index": index,
+            "text": paragraph,
+            "part_type": "legacy_text",
+        }
+        for index, paragraph in enumerate(paragraphs, start=1)
+    ]
+    markdown_lines = [f"# {source.stem}", ""]
+    markdown_lines.extend(paragraphs or [""])
+    full_path = out_dir / f"{source.stem}.full.md"
+    manifest_path = out_dir / f"{source.stem}.manifest.json"
+    ext = source.suffix.lower().lstrip(".")
+    messages = list(extraction.get("messages", []))
+    if conversion and conversion.get("messages"):
+        messages = list(conversion.get("messages", [])) + messages
+    fallback_conversion = {
+        "required": True,
+        "status": "text_fallback",
+        "backend": extraction.get("backend", "legacy-text"),
+        "output_path": str(text_path),
+        "messages": messages,
+    }
+    if conversion:
+        fallback_conversion["conversion_attempt"] = conversion
+    visual_required = True
+    manifest = {
+        "source": {"path": str(source), "name": source.name},
+        "normalized_file": {"path": str(text_path), "extension": ".txt"},
+        "conversion": fallback_conversion,
+        "document_type": ext,
+        "reading_mode": mode,
+        "metadata": {},
+        "structure": structure,
+        "tables": [],
+        "comments": [],
+        "revisions": [],
+        "notes": [],
+        "visual_findings": [
+            {
+                "requires_visual_review": visual_required,
+                "reason": "legacy text fallback cannot inspect binary Office layout, tables, or embedded media",
+                "media_count": 0,
+                "media": [],
+                "relationships": [],
+            }
+        ],
+        "visual_analysis": {
+            "status": "skipped",
+            "mode": mode,
+            "rendered_page_count": 0,
+            "analyzed_item_count": 0,
+            "cache_hits": 0,
+            "messages": ["Legacy text fallback skipped rendering and OCR."],
+        },
+        "completeness_score": legacy_text_completeness(structure, visual_required),
+        "artifacts": {"full_markdown": str(full_path), "manifest": str(manifest_path), "legacy_text": str(text_path)},
+    }
+    full_path.write_text("\n\n".join(markdown_lines).strip() + "\n", encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest_path
 
 
 def run_reader(normalized: Path, out_dir: Path) -> Path:
@@ -171,11 +318,37 @@ def main() -> int:
         if args.install_missing_deps:
             bootstrap_deps(include_system_tools=args.install_system_tools)
         if ext in {".doc", ".ppt"}:
-            conversion = convert_legacy(source, out_dir)
-            normalized_path = conversion.get("output_path")
-            if not normalized_path:
-                raise RuntimeError("Legacy conversion did not return an output_path.")
-            normalized = Path(normalized_path).resolve()
+            if args.mode == "fast":
+                extraction = extract_legacy_text(source, out_dir)
+                manifest_path = write_legacy_text_artifacts(source, out_dir, extraction, None, args.mode)
+                report_path = assemble_report(manifest_path)
+                normalized = Path(extraction.get("output_path", source)).resolve()
+                result = {
+                    "full_markdown": str(out_dir / f"{source.stem}.full.md"),
+                    "manifest": str(manifest_path),
+                    "report": str(report_path),
+                }
+                print(json.dumps(result, ensure_ascii=True, indent=2))
+                return 0
+            try:
+                conversion = convert_legacy(source, out_dir)
+                normalized_path = conversion.get("output_path")
+                if not normalized_path:
+                    raise RuntimeError("Legacy conversion did not return an output_path.")
+                normalized = Path(normalized_path).resolve()
+            except Exception as conversion_exc:
+                conversion_failure = parse_conversion_error(conversion_exc)
+                extraction = extract_legacy_text(source, out_dir)
+                manifest_path = write_legacy_text_artifacts(source, out_dir, extraction, conversion_failure, args.mode)
+                report_path = assemble_report(manifest_path)
+                normalized = Path(extraction.get("output_path", source)).resolve()
+                result = {
+                    "full_markdown": str(out_dir / f"{source.stem}.full.md"),
+                    "manifest": str(manifest_path),
+                    "report": str(report_path),
+                }
+                print(json.dumps(result, ensure_ascii=True, indent=2))
+                return 0
         elif ext not in {".docx", ".pptx"}:
             print("office-reader supports only .doc, .docx, .ppt, and .pptx files.", file=sys.stderr)
             return 2

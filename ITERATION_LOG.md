@@ -1,5 +1,52 @@
 # Office Reader Iteration Log
 
+## 2026-06-03 - Legacy fast text fallback for simple lookup tasks
+
+### Problems Found
+
+- Simple lookup questions on legacy `.doc` files could spend minutes attempting full conversion before falling back to plain text manually.
+- `read_office.py` treated legacy conversion failure as a hard failure, even when text-only extraction would answer narrow tasks such as "find experiment eight thinking questions."
+- `.ppt` legacy fast lookup had the same risk pattern.
+
+### Changes Completed
+
+- Added `scripts/extract_legacy_text.ps1`:
+  - `.doc`: read-only Word COM text extraction.
+  - `.ppt`: read-only PowerPoint COM slide/notes text extraction.
+  - structured JSON success/failure output.
+- Added `read_office.py --mode fast` legacy behavior:
+  - `.doc` and `.ppt` go directly to text fallback instead of full conversion.
+  - produces normal `.full.md`, `.manifest.json`, and `.report.md` artifacts.
+- Added `balanced`/`complete` fallback behavior:
+  - if full legacy conversion fails, `read_office.py` tries text fallback before returning failure.
+  - manifest records `conversion.status: text_fallback`.
+  - completeness score stays conservative and warns that layout/media/tables may be incomplete.
+- Added BOM stripping for PowerShell UTF-8 text output.
+- Added test override environment variables for deterministic conversion/text fallback tests:
+  - `OFFICE_READER_CONVERT_LEGACY_SCRIPT`
+  - `OFFICE_READER_LEGACY_TEXT_EXTRACTOR`
+- Updated `SKILL.md`, `README.md`, `references/output_schema.md`, and `references/backend_fallbacks.md`.
+
+### Verification
+
+- Focused tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_unified_reader_fast_mode_uses_legacy_text_fallback_for_doc tests.test_office_reader.OfficeReaderTests.test_unified_reader_fast_mode_uses_legacy_text_fallback_for_ppt tests.test_office_reader.OfficeReaderTests.test_unified_reader_falls_back_to_legacy_text_when_conversion_fails -v`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 31 tests
+
+### Remaining Risks
+
+- Text fallback still depends on Office COM availability for legacy `.doc/.ppt`.
+- Text fallback is not a substitute for full deep reading: tables, comments, revisions, media, and layout can be incomplete.
+- No explicit natural-language query argument exists yet; callers still choose `--mode fast` for narrow lookup tasks.
+
+### Next Round Direction
+
+- Add a lightweight query/excerpt helper or continue with DOCX drawing/image metadata inventory.
+
 ## 2026-06-02 - DOCX move revision extraction
 
 ### Problems Found

@@ -19,9 +19,12 @@ For PowerPoint files, the manifest and report include a per-slide visual object 
 ```powershell
 python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode balanced
 python scripts\read_office.py C:\path\file.pptx --out-dir C:\path\out --mode complete --no-openai-vision
+python scripts\read_office.py C:\path\legacy.doc --out-dir C:\path\out --mode fast
 ```
 
 `read_office.py` prints ASCII-safe JSON on stdout so automation can parse output paths reliably even when source or output paths contain Chinese characters or spaces.
+
+Use `--mode fast` for simple lookup tasks such as finding a section, question, or keyword. For legacy `.doc` and `.ppt`, fast mode uses a text-only fallback first. If full legacy conversion fails in `balanced` or `complete`, the unified reader also falls back to searchable text artifacts and marks `conversion.status` as `text_fallback`.
 
 ## Dependencies
 

@@ -23,7 +23,7 @@ Use this skill to turn Word and PowerPoint files into a full Markdown transcript
 
 ## Reading Modes
 
-- `--mode fast`: OOXML extraction plus media flags only. Use when the user wants a quick text pass.
+- `--mode fast`: quickest text-first pass. Use for simple lookup tasks such as finding a chapter, section, experiment question, keyword, or short excerpt. For `.doc` and `.ppt`, fast mode uses a legacy COM text extractor first and does not wait for full `.docx/.pptx` conversion.
 - `--mode balanced`: default. Render pages/slides only when visual risk is detected, OCR/vision-analyze selected items, and use cache.
 - `--mode complete`: render and analyze every page/slide. Use when the user asks to fully understand image-heavy or evidence-critical documents.
 
@@ -48,6 +48,8 @@ Every successful read produces:
 - `<basename>.report.md`: structured reading report with summary, read completeness, outline, tables, comments/revisions, notes, visual findings, risks, and artifacts.
 
 If legacy conversion fails, return the conversion JSON and explain which backends were unavailable. Do not pretend a `.doc` or `.ppt` was read when no normalized `.docx` or `.pptx` exists.
+
+For narrow lookup tasks on legacy `.doc` or `.ppt` files, use `read_office.py --mode fast`. It produces the normal Markdown, manifest, and report from a text-only fallback and marks `conversion.status` as `text_fallback`. In `balanced` or `complete`, if full legacy conversion fails, `read_office.py` automatically tries the same text fallback so the caller still gets searchable artifacts with conservative completeness warnings.
 
 ## Legacy Conversion Backends
 
@@ -86,6 +88,7 @@ python scripts\read_office.py C:\path\file.docx --out-dir C:\path\out --mode bal
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\bootstrap_deps.ps1 -DryRun -IncludeSystemTools
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\discover_office_backends.ps1 -InputExtension .doc -Format json
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\convert_legacy_office.ps1 -InputPath C:\path\file.doc -OutputDir C:\path\out
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\extract_legacy_text.ps1 -InputPath C:\path\file.doc -OutputPath C:\path\out\file.legacy-text.txt
 python scripts\read_docx.py C:\path\file.docx --out-dir C:\path\out
 python scripts\read_pptx.py C:\path\file.pptx --out-dir C:\path\out
 python scripts\visual_analysis.py C:\path\out\file.manifest.json --normalized-file C:\path\file.docx --out-dir C:\path\out --mode balanced

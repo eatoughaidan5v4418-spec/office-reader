@@ -8,7 +8,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 
 - `source`: original file path and name.
 - `normalized_file`: actual `.docx` or `.pptx` file read after legacy conversion.
-- `conversion`: conversion status, backend, output path, and messages.
+- `conversion`: conversion status, backend, output path, and messages. For legacy `.doc/.ppt` text fallback, `status` is `text_fallback` and `output_path` points to the extracted `.legacy-text.txt` file.
 - `document_type`: `docx` or `pptx`.
 - `reading_mode`: `fast`, `balanced`, or `complete`.
 - `metadata`: package metadata from `docProps/core.xml` when present.

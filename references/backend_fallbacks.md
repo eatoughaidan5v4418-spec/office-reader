@@ -1,6 +1,8 @@
 # Backend Fallbacks
 
-Legacy `.doc` and `.ppt` inputs must be normalized before reading. The conversion script emits JSON so the calling agent can report exactly what happened.
+Legacy `.doc` and `.ppt` inputs normally should be normalized before full deep reading. The conversion script emits JSON so the calling agent can report exactly what happened.
+
+For simple lookup tasks, `read_office.py --mode fast` uses `scripts/extract_legacy_text.ps1` first and produces searchable Markdown, manifest, and report artifacts without waiting for full `.docx/.pptx` conversion. This fallback is intentionally text-only: tables, comments, revisions, layout, and media are not guaranteed. The manifest records `conversion.status: "text_fallback"` and a conservative completeness score.
 
 ## Priority Order
 
@@ -32,6 +34,8 @@ Legacy conversion refuses to overwrite an existing normalized `.docx` or `.pptx`
 ## Failure Contract
 
 When all backends fail, the script exits non-zero and prints JSON with `status: "failed"` plus messages for every attempted backend. Surface those messages to the user.
+
+The unified `read_office.py` entrypoint catches legacy conversion failure in `balanced` and `complete` modes and then tries the text fallback. This prevents narrow text questions from ending with only a conversion error while still making the degraded coverage explicit.
 
 ## Preview Rendering
 

@@ -731,6 +731,158 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertTrue(Path(data["manifest"]).exists())
             self.assertTrue(Path(data["report"]).exists())
 
+    def test_unified_reader_fast_mode_uses_legacy_text_fallback_for_doc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "legacy.doc"
+            out_dir = tmp_path / "out"
+            extractor = tmp_path / "extract_legacy_text.ps1"
+            converter = tmp_path / "should_not_run.ps1"
+            source.write_bytes(b"legacy binary placeholder")
+            extractor.write_text(
+                "param([string]$InputPath,[string]$OutputPath)\n"
+                "Set-Content -LiteralPath $OutputPath -Value \"Experiment Eight`nThinking question\" -Encoding UTF8\n"
+                "[pscustomobject]@{status='success';backend='fake-text';output_path=$OutputPath;messages=@('fake text ok')} | ConvertTo-Json -Depth 5\n",
+                encoding="utf-8",
+            )
+            converter.write_text(
+                "throw 'fast mode should not invoke conversion'\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["OFFICE_READER_LEGACY_TEXT_EXTRACTOR"] = str(extractor)
+            env["OFFICE_READER_CONVERT_LEGACY_SCRIPT"] = str(converter)
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "read_office.py"),
+                    str(source),
+                    "--out-dir",
+                    str(out_dir),
+                    "--mode",
+                    "fast",
+                    "--no-openai-vision",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            manifest = json.loads(Path(data["manifest"]).read_text(encoding="utf-8"))
+            self.assertEqual(manifest["conversion"]["status"], "text_fallback")
+            self.assertEqual(manifest["conversion"]["backend"], "fake-text")
+            self.assertNotIn("conversion_attempt", manifest["conversion"])
+            self.assertEqual(manifest["structure"][0]["text"], "Experiment Eight")
+            self.assertEqual(manifest["visual_analysis"]["status"], "skipped")
+            self.assertTrue(Path(data["report"]).exists())
+
+    def test_unified_reader_fast_mode_uses_legacy_text_fallback_for_ppt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "legacy.ppt"
+            out_dir = tmp_path / "out"
+            extractor = tmp_path / "extract_legacy_text.ps1"
+            converter = tmp_path / "should_not_run.ps1"
+            source.write_bytes(b"legacy binary placeholder")
+            extractor.write_text(
+                "param([string]$InputPath,[string]$OutputPath)\n"
+                "Set-Content -LiteralPath $OutputPath -Value \"Slide 1`nThinking question\" -Encoding UTF8\n"
+                "[pscustomobject]@{status='success';backend='fake-ppt-text';output_path=$OutputPath;messages=@('fake ppt text ok')} | ConvertTo-Json -Depth 5\n",
+                encoding="utf-8",
+            )
+            converter.write_text("throw 'fast mode should not invoke conversion'\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["OFFICE_READER_LEGACY_TEXT_EXTRACTOR"] = str(extractor)
+            env["OFFICE_READER_CONVERT_LEGACY_SCRIPT"] = str(converter)
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "read_office.py"),
+                    str(source),
+                    "--out-dir",
+                    str(out_dir),
+                    "--mode",
+                    "fast",
+                    "--no-openai-vision",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            manifest = json.loads(Path(data["manifest"]).read_text(encoding="utf-8"))
+            self.assertEqual(manifest["document_type"], "ppt")
+            self.assertEqual(manifest["conversion"]["status"], "text_fallback")
+            self.assertEqual(manifest["conversion"]["backend"], "fake-ppt-text")
+            self.assertEqual(manifest["structure"][0]["text"], "Slide 1")
+            self.assertTrue(Path(data["report"]).exists())
+
+    def test_unified_reader_falls_back_to_legacy_text_when_conversion_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "legacy.doc"
+            out_dir = tmp_path / "out"
+            extractor = tmp_path / "extract_legacy_text.ps1"
+            converter = tmp_path / "fail_convert.ps1"
+            source.write_bytes(b"legacy binary placeholder")
+            extractor.write_text(
+                "param([string]$InputPath,[string]$OutputPath)\n"
+                "Set-Content -LiteralPath $OutputPath -Value \"Fallback paragraph\" -Encoding UTF8\n"
+                "[pscustomobject]@{status='success';backend='fake-text';output_path=$OutputPath;messages=@('fake text ok')} | ConvertTo-Json -Depth 5\n",
+                encoding="utf-8",
+            )
+            converter.write_text(
+                "[pscustomobject]@{required=$true;status='failed';backend='';output_path='';messages=@('fake conversion failed')} | ConvertTo-Json -Depth 5\n"
+                "exit 1\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["OFFICE_READER_LEGACY_TEXT_EXTRACTOR"] = str(extractor)
+            env["OFFICE_READER_CONVERT_LEGACY_SCRIPT"] = str(converter)
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "read_office.py"),
+                    str(source),
+                    "--out-dir",
+                    str(out_dir),
+                    "--mode",
+                    "balanced",
+                    "--no-openai-vision",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            manifest = json.loads(Path(data["manifest"]).read_text(encoding="utf-8"))
+            self.assertEqual(manifest["conversion"]["status"], "text_fallback")
+            self.assertEqual(manifest["conversion"]["conversion_attempt"]["status"], "failed")
+            self.assertEqual(manifest["structure"][0]["text"], "Fallback paragraph")
+            self.assertLess(manifest["completeness_score"]["overall"], 80)
+            self.assertTrue(Path(data["report"]).exists())
+
     def test_unified_reader_accepts_modes_and_enriches_visual_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
