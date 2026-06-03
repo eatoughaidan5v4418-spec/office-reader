@@ -2,7 +2,7 @@
 
 `office-reader` writes a manifest JSON file beside the Markdown transcript and report.
 
-The unified `scripts/read_office.py` command also prints a small JSON object to stdout with `full_markdown`, `manifest`, and `report` paths. When comments or tracked revisions are extracted, stdout also includes `review_items`. When `--query` is used, stdout also includes `query_results`. Stdout/stderr are configured as UTF-8 so callers can decode output paths reliably when paths contain Chinese characters or spaces. PowerShell 5 callers should read generated JSON files with `-Encoding UTF8`.
+The unified `scripts/read_office.py` command also prints a small JSON object to stdout with `full_markdown`, `manifest`, and `report` paths. When comments or tracked revisions are extracted, stdout also includes `review_items` and `review_items_csv`. When `--query` is used, stdout also includes `query_results`. Stdout/stderr are configured as UTF-8 so callers can decode output paths reliably when paths contain Chinese characters or spaces. PowerShell 5 callers should read generated JSON files with `-Encoding UTF8`.
 
 ## Top-Level Fields
 
@@ -26,7 +26,7 @@ The unified `scripts/read_office.py` command also prints a small JSON object to 
 
 ## Review Items
 
-When comments or tracked revisions are extracted, `read_office.py` writes `<basename>.review-items.json`, records the path under `manifest.artifacts.review_items`, includes `review_items` in stdout, and lists it in the report artifacts.
+When comments or tracked revisions are extracted, `read_office.py` writes `<basename>.review-items.json` plus UTF-8-BOM `<basename>.review-items.csv`, records the paths under `manifest.artifacts.review_items` and `manifest.artifacts.review_items_csv`, includes `review_items` and `review_items_csv` in stdout, and lists both in the report artifacts.
 
 `<basename>.review-items.json` fields:
 
@@ -37,6 +37,11 @@ When comments or tracked revisions are extracted, `read_office.py` writes `<base
 - `items`: flat review queue. Comment items include `kind: "comment"`, `comment_id`, `author`, `initials`, `date`, `text`, `anchor_text`, `location`, and `status: "open"`. Revision items include `kind: "revision"`, `revision_type`, `author`, `date`, `text`, `location`, and `status: "pending"`.
 
 `location` preserves available source coordinates such as paragraph, slide, table row/cell, Word part, and container.
+
+`<basename>.review-items.csv` has fixed spreadsheet-friendly columns:
+
+- `id`, `kind`, `status`, `comment_id`, `revision_type`, `author`, `initials`, `date`, `text`, `anchor_text`
+- `paragraph_index`, `slide_index`, `table_index`, `row_index`, `cell_index`, `part_type`, `part`, `container`
 
 ## Query Results
 

@@ -1,4 +1,5 @@
 import json
+import csv
 import subprocess
 import sys
 import tempfile
@@ -1130,8 +1131,11 @@ class OfficeReaderTests(unittest.TestCase):
 
             stdout = json.loads(proc.stdout)
             self.assertIn("review_items", stdout)
+            self.assertIn("review_items_csv", stdout)
             review_path = Path(stdout["review_items"])
+            review_csv_path = Path(stdout["review_items_csv"])
             self.assertTrue(review_path.exists())
+            self.assertTrue(review_csv_path.exists())
             review = json.loads(review_path.read_text(encoding="utf-8"))
             self.assertEqual(review["total_items"], 6)
             self.assertEqual(review["counts"]["comments"], 2)
@@ -1145,11 +1149,24 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertEqual(table_revision["location"]["table_index"], 1)
             self.assertEqual(table_revision["location"]["row_index"], 2)
             self.assertEqual(table_revision["location"]["cell_index"], 2)
+            with review_csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 6)
+            self.assertEqual(rows[0]["kind"], "comment")
+            self.assertEqual(rows[0]["text"], "Please verify the ARR source.")
+            self.assertEqual(rows[0]["paragraph_index"], "2")
+            csv_revision = next(row for row in rows if row["kind"] == "revision" and row["text"] == "verified")
+            self.assertEqual(csv_revision["revision_type"], "insertion")
+            self.assertEqual(csv_revision["table_index"], "1")
+            self.assertEqual(csv_revision["row_index"], "2")
+            self.assertEqual(csv_revision["cell_index"], "2")
 
             manifest = json.loads((out_dir / "board-memo.manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["artifacts"]["review_items"], str(review_path))
+            self.assertEqual(manifest["artifacts"]["review_items_csv"], str(review_csv_path))
             report = (out_dir / "board-memo.report.md").read_text(encoding="utf-8")
             self.assertIn("- Review items:", report)
+            self.assertIn("- Review items CSV:", report)
 
     def test_unified_reader_preserves_pptx_comment_author_in_review_items(self):
         with tempfile.TemporaryDirectory() as tmp:

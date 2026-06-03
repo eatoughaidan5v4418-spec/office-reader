@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import locale
 import json
 import os
@@ -418,12 +420,54 @@ def review_items_for_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
-def write_review_items(manifest_path: Path) -> Path | None:
+REVIEW_CSV_FIELDS = [
+    "id",
+    "kind",
+    "status",
+    "comment_id",
+    "revision_type",
+    "author",
+    "initials",
+    "date",
+    "text",
+    "anchor_text",
+    "paragraph_index",
+    "slide_index",
+    "table_index",
+    "row_index",
+    "cell_index",
+    "part_type",
+    "part",
+    "container",
+]
+
+
+def review_item_csv_row(item: dict[str, Any]) -> dict[str, Any]:
+    location = item.get("location", {})
+    row = {field: "" for field in REVIEW_CSV_FIELDS}
+    for key in ("id", "kind", "status", "comment_id", "revision_type", "author", "initials", "date", "text", "anchor_text"):
+        row[key] = item.get(key, "")
+    for key in ("paragraph_index", "slide_index", "table_index", "row_index", "cell_index", "part_type", "part", "container"):
+        row[key] = location.get(key, "")
+    return row
+
+
+def write_review_csv(path: Path, items: list[dict[str, Any]]) -> None:
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=REVIEW_CSV_FIELDS)
+    writer.writeheader()
+    for item in items:
+        writer.writerow(review_item_csv_row(item))
+    path.write_text("\ufeff" + buffer.getvalue(), encoding="utf-8")
+
+
+def write_review_items(manifest_path: Path) -> dict[str, Path]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     items = review_items_for_manifest(manifest)
     if not items:
-        return None
+        return {}
     review_path = manifest_path.with_name(manifest_path.name.replace(".manifest.json", ".review-items.json"))
+    review_csv_path = manifest_path.with_name(manifest_path.name.replace(".manifest.json", ".review-items.csv"))
     payload = {
         "source": manifest.get("source", {}),
         "document_type": manifest.get("document_type", ""),
@@ -435,9 +479,11 @@ def write_review_items(manifest_path: Path) -> Path | None:
         "items": items,
     }
     review_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_review_csv(review_csv_path, items)
     manifest.setdefault("artifacts", {})["review_items"] = str(review_path)
+    manifest.setdefault("artifacts", {})["review_items_csv"] = str(review_csv_path)
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    return review_path
+    return {"review_items": review_path, "review_items_csv": review_csv_path}
 
 
 def apply_query(manifest_path: Path, query: str, limit: int = 20) -> Path:
@@ -570,7 +616,7 @@ def main() -> int:
     conversion = None
     normalized = source
     query_path = None
-    review_path = None
+    review_artifacts: dict[str, Path] = {}
     try:
         if args.install_missing_deps:
             bootstrap_deps(include_system_tools=args.install_system_tools)
@@ -578,7 +624,7 @@ def main() -> int:
             if args.mode == "fast":
                 extraction = extract_legacy_text(source, out_dir)
                 manifest_path = write_legacy_text_artifacts(source, out_dir, extraction, None, args.mode)
-                review_path = write_review_items(manifest_path)
+                review_artifacts = write_review_items(manifest_path)
                 if args.query:
                     query_path = apply_query(manifest_path, args.query, args.query_limit)
                 report_path = assemble_report(manifest_path, include_evidence=args.evidence_report)
@@ -588,8 +634,8 @@ def main() -> int:
                     "manifest": str(manifest_path),
                     "report": str(report_path),
                 }
-                if review_path:
-                    result["review_items"] = str(review_path)
+                for key, path in review_artifacts.items():
+                    result[key] = str(path)
                 if query_path:
                     result["query_results"] = str(query_path)
                 print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -604,7 +650,7 @@ def main() -> int:
                 conversion_failure = parse_conversion_error(conversion_exc)
                 extraction = extract_legacy_text(source, out_dir)
                 manifest_path = write_legacy_text_artifacts(source, out_dir, extraction, conversion_failure, args.mode)
-                review_path = write_review_items(manifest_path)
+                review_artifacts = write_review_items(manifest_path)
                 if args.query:
                     query_path = apply_query(manifest_path, args.query, args.query_limit)
                 report_path = assemble_report(manifest_path, include_evidence=args.evidence_report)
@@ -614,8 +660,8 @@ def main() -> int:
                     "manifest": str(manifest_path),
                     "report": str(report_path),
                 }
-                if review_path:
-                    result["review_items"] = str(review_path)
+                for key, path in review_artifacts.items():
+                    result[key] = str(path)
                 if query_path:
                     result["query_results"] = str(query_path)
                 print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -635,7 +681,7 @@ def main() -> int:
             timeout_seconds=args.visual_timeout_seconds,
             media_ocr=args.media_ocr,
         )
-        review_path = write_review_items(manifest_path)
+        review_artifacts = write_review_items(manifest_path)
         if args.query:
             query_path = apply_query(manifest_path, args.query, args.query_limit)
         report_path = assemble_report(manifest_path, include_evidence=args.evidence_report)
@@ -648,8 +694,8 @@ def main() -> int:
         "manifest": str(manifest_path),
         "report": str(report_path),
     }
-    if review_path:
-        result["review_items"] = str(review_path)
+    for key, path in review_artifacts.items():
+        result[key] = str(path)
     if query_path:
         result["query_results"] = str(query_path)
     print(json.dumps(result, ensure_ascii=False, indent=2))

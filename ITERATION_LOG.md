@@ -1,5 +1,55 @@
 # Office Reader Iteration Log
 
+## 2026-06-03 - Review item CSV export
+
+### Problems Found
+
+- Review items were exported as JSON only.
+- Spreadsheet-first audit workflows had to manually transform review-item JSON before sorting, filtering, or annotating comments and revisions.
+- The report artifact labeler did not have a human-friendly label for a future CSV review queue artifact.
+
+### Changes Completed
+
+- Added `<basename>.review-items.csv` generation beside `<basename>.review-items.json`.
+- Added `manifest.artifacts.review_items_csv` and stdout `review_items_csv`.
+- CSV rows use a fixed schema with item identity, status, author/initials/date, text, anchor text, and flattened source-location columns.
+- CSV files are written as UTF-8 with BOM for Excel/PowerShell spreadsheet compatibility.
+- Updated report artifact labels so `review_items_csv` appears as `Review items CSV`.
+- Updated `SKILL.md`, `README.md`, and `references/output_schema.md`.
+
+### Verification
+
+- TDD red test:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_unified_reader_writes_review_items_artifact -v`
+  - Initial result: failed because stdout did not include `review_items_csv`.
+- Focused tests after implementation:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_unified_reader_writes_review_items_artifact tests.test_office_reader.OfficeReaderTests.test_unified_reader_preserves_pptx_comment_author_in_review_items tests.test_office_reader.OfficeReaderTests.test_report_assembler_uses_manifest_counts_and_outline -v`
+  - Result: `OK`
+- Syntax check:
+  - `python -m py_compile scripts\read_office.py scripts\assemble_report.py tests\test_office_reader.py`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 49 tests
+- Real DOCX smoke:
+  - Source: `C:\Users\Huang\Desktop\Proj\答辩\(黄曼)基于STM32多参数水质实时监测系统设计与实现 .docx`
+  - Command: `read_office.py ... --mode fast --no-openai-vision`
+  - Output: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\review-items-csv-20260603-real-docx`
+  - Result: success
+  - `review_items_csv` appeared in stdout and `manifest.artifacts.review_items_csv`.
+  - CSV BOM: `b'\xef\xbb\xbf'`
+  - CSV rows: `9`
+  - JSON `total_items`: `9`
+
+### Remaining Risks
+
+- CSV is a flattened export. Nested review-item fields beyond the fixed location columns remain available in the JSON artifact.
+
+### Next Round Direction
+
+- Add optional review-item Markdown checklist export for lightweight manual review.
+
 ## 2026-06-03 - PPTX comment author metadata
 
 ### Problems Found

@@ -52,7 +52,7 @@ Every successful read produces:
 - `<basename>.full.md`: full Markdown transcript with headings, slide boundaries, tables, comments, revisions, and notes where extractable.
 - `<basename>.manifest.json`: structured extraction data plus `reading_mode`, `visual_analysis`, and `completeness_score`. See `references/output_schema.md`.
 - `<basename>.report.md`: structured reading report with summary, read completeness, outline, tables, comments/revisions, notes, visual findings, risks, and artifacts.
-- `<basename>.review-items.json`: generated when comments or tracked revisions are extracted, with a flat review queue containing item kind, text, author/date where available, status, and source location.
+- `<basename>.review-items.json` and `<basename>.review-items.csv`: generated when comments or tracked revisions are extracted, with a flat review queue containing item kind, text, author/date where available, status, and source location. The CSV is UTF-8 with BOM for spreadsheet compatibility.
 - `<basename>.query.json`: generated when `--query` is provided, with query tokens, match count, source type, location metadata, and matched excerpts.
 - `embedded_media/`: extracted packaged images and media when OOXML relationships reference `word/media` or `ppt/media`. Manifest `embedded_media[]` records include a derived `label` when captions, alt text, object names, or nearby context are available. EMF files are cached as PNG previews when Windows GDI+ conversion is available.
 - `media_contact_sheet.jpg` and `media_summary.json`: lightweight visual index of extracted image-like media, with labels from captions/alt text/nearby context when available.
