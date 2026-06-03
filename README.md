@@ -10,6 +10,8 @@ It reads `.doc`, `.docx`, `.ppt`, and `.pptx` into:
 
 The default path is Microsoft Office COM first for legacy conversion, then optional WPS, then LibreOffice. Preview rendering uses Office COM when healthy and falls back to LibreOffice; slow or invalid COM preview runs are remembered in `.office-reader-cache/preview-backend-health.json`. Visual deep reading combines OOXML extraction, embedded media extraction, rendered page/slide analysis, local OCR, optional OpenAI vision, and cache reuse.
 
+Legacy `.doc`/`.ppt` Office COM conversion also runs in an isolated worker with timeout protection and health memory. Slow or failed Office COM conversion attempts are recorded in `.office-reader-cache/conversion-backend-health.json`, so later conversion runs can skip directly to WPS/LibreOffice fallback backends while reporting the reason.
+
 Reports include a conservative `completeness_score` so callers can see text/table/visual coverage and remaining unverified visual items. It is a coverage signal, not proof that every visual fact was understood.
 
 For PowerPoint files, the manifest and report include a per-slide visual object inventory for images, charts, SmartArt, OLE objects, video, and audio when those objects are visible in slide relationships. These records are risk/location hints; rendered OCR or OpenAI vision is still required before claiming the visual content itself was understood.

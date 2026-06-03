@@ -29,6 +29,10 @@ The converter attempts Microsoft Office COM first. If Office COM is unavailable 
 
 LibreOffice is used through headless `soffice --convert-to` only after Office COM and WPS fail or are missing.
 
+Office COM legacy conversion runs in an isolated worker with `-TimeoutSeconds`. `read_office.py` forwards `--visual-timeout-seconds` to this converter and enables fallback continuation. If the Office COM worker times out or fails, the converter records `office-com` health under `.office-reader-cache/conversion-backend-health.json` and continues to WPS/LibreOffice when allowed. Set `OFFICE_READER_CONVERSION_HEALTH_PATH` to isolate this file for tests or diagnostics. The path must end in `.json`; existing files must be conversion-health JSON objects so arbitrary user files are not overwritten.
+
+When conversion health memory marks Office COM unhealthy for `.doc` or `.ppt`, later auto-priority conversion runs skip Office COM and report the skip message before trying fallback conversion backends. Explicit `-PreferredBackend office-com` still attempts Office COM.
+
 Legacy conversion refuses to overwrite an existing normalized `.docx` or `.pptx` output. Use a fresh output directory when rerunning conversion for the same source.
 
 ## Failure Contract

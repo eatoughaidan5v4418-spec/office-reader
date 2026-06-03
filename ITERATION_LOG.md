@@ -1,5 +1,67 @@
 # Office Reader Iteration Log
 
+## 2026-06-03 - Legacy conversion COM timeout and health memory
+
+### Problems Found
+
+- Legacy `.doc`/`.ppt` conversion used Office COM directly and lacked preview-style timeout isolation.
+- A slow or stuck Office COM conversion could block the conversion path before WPS/LibreOffice fallback.
+- Legacy conversion did not remember unhealthy Office COM behavior, so later runs could repeat the same slow failure.
+- Conversion health diagnostics had no path-safety guard comparable to preview health memory.
+
+### Changes Completed
+
+- Added `convert_legacy_office.ps1 -TimeoutSeconds` and `-ContinueAfterComFailure`.
+- Added isolated Office COM conversion worker with timeout handling.
+- Added `.office-reader-cache/conversion-backend-health.json` health memory, overridable with `OFFICE_READER_CONVERSION_HEALTH_PATH`.
+- Added path safety validation so conversion health memory cannot overwrite arbitrary JSON/non-JSON files.
+- Auto-priority conversion skips Office COM when health memory marks it unhealthy for `.doc` or `.ppt`, then tries WPS/LibreOffice fallback backends.
+- `read_office.py` now forwards `--visual-timeout-seconds` to legacy conversion and enables fallback continuation for the built-in converter.
+- Updated `SKILL.md`, `README.md`, and `references/backend_fallbacks.md`.
+
+### Verification
+
+- TDD red tests:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_legacy_conversion_skips_unhealthy_office_com_from_health_memory tests.test_office_reader.OfficeReaderTests.test_legacy_conversion_rejects_health_path_that_would_overwrite_regular_file -v`
+  - Initial result: health skip failed; invalid health path initially risked slow backend probing.
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_legacy_conversion_office_com_timeout_records_health_and_falls_back -v`
+  - Initial result: failed because Office COM conversion did not run through a timeout-isolated worker.
+- Focused tests after implementation:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_legacy_conversion_refuses_to_overwrite_existing_normalized_file tests.test_office_reader.OfficeReaderTests.test_legacy_conversion_cleans_libreoffice_profile_directory tests.test_office_reader.OfficeReaderTests.test_legacy_conversion_skips_unhealthy_office_com_from_health_memory tests.test_office_reader.OfficeReaderTests.test_legacy_conversion_rejects_health_path_that_would_overwrite_regular_file tests.test_office_reader.OfficeReaderTests.test_legacy_conversion_office_com_timeout_records_health_and_falls_back tests.test_office_reader.OfficeReaderTests.test_legacy_conversion_libreoffice_timeout_is_structured -v`
+  - Result: `OK`
+- Legacy fallback JSON safety:
+  - `python -m unittest tests.test_office_reader.OfficeReaderTests.test_legacy_text_fallback_manifest_is_powershell_json_safe -v`
+  - Result: `OK`
+- Syntax check:
+  - `python -m py_compile scripts\read_office.py tests\test_office_reader.py`
+  - Result: `OK`
+- Full test suite:
+  - `python -m unittest discover -s tests -v`
+  - Result: `OK`
+  - Count: 47 tests
+- Real legacy DOC smoke:
+  - Source: `C:\Users\Huang\Desktop\CC\第十八届合泰杯复赛报告书_基于HT32的无感式智能体态与脊柱健康监测垫_终稿.doc`
+  - Command: `read_office.py ... --mode balanced --visual-timeout-seconds 5 --query "HT32" --no-openai-vision`
+  - Output: `C:\Users\Huang\Documents\2123Near\office-reader-real-smoke\legacy-timeout-round-20260603-ht32-doc-v2`
+  - Result: success
+  - Conversion status: `text_fallback`
+  - Conversion backend: `word-com-text`
+  - Query matches: `16`
+  - Conversion messages included Office COM health-memory skip, LibreOffice 5-second timeout, and Word COM text fallback success.
+  - Manifest re-read checks:
+    - Python `json.loads`: `OK`
+    - PowerShell `Get-Content -Encoding UTF8 | ConvertFrom-Json`: `OK`
+
+### Remaining Risks
+
+- Worker timeout protects the conversion wrapper, but Office/WPS COM automation can still leave external Office processes that require OS-level cleanup in rare cases.
+- LibreOffice fallback is now timeout-bounded, but a timed-out conversion may produce no normalized `.docx/.pptx`; balanced/complete mode can still fall back to searchable legacy text when available.
+- Health memory is intentionally conservative; users can clear `.office-reader-cache/conversion-backend-health.json` after fixing Office installation problems.
+
+### Next Round Direction
+
+- Add review-item export for comments and tracked revisions.
+
 ## 2026-06-03 - DOCX table semantic hints
 
 ### Problems Found

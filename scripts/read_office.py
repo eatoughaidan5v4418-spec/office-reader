@@ -62,21 +62,28 @@ def legacy_text_script_path() -> Path:
     return Path(override) if override else SCRIPT_DIR / "extract_legacy_text.ps1"
 
 
-def convert_legacy(source: Path, out_dir: Path) -> dict:
-    proc = run_command(
-        [
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(conversion_script_path()),
-            "-InputPath",
-            str(source),
-            "-OutputDir",
-            str(out_dir),
-        ]
-    )
+def convert_legacy(source: Path, out_dir: Path, timeout_seconds: int = 90) -> dict:
+    command = [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(conversion_script_path()),
+        "-InputPath",
+        str(source),
+        "-OutputDir",
+        str(out_dir),
+    ]
+    if not os.environ.get("OFFICE_READER_CONVERT_LEGACY_SCRIPT"):
+        command.extend(
+            [
+                "-TimeoutSeconds",
+                str(timeout_seconds),
+                "-ContinueAfterComFailure",
+            ]
+        )
+    proc = run_command(command)
     try:
         result = json.loads(proc.stdout)
     except json.JSONDecodeError:
@@ -514,7 +521,7 @@ def main() -> int:
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
             try:
-                conversion = convert_legacy(source, out_dir)
+                conversion = convert_legacy(source, out_dir, timeout_seconds=args.visual_timeout_seconds)
                 normalized_path = conversion.get("output_path")
                 if not normalized_path:
                     raise RuntimeError("Legacy conversion did not return an output_path.")

@@ -1958,6 +1958,290 @@ class OfficeReaderTests(unittest.TestCase):
             self.assertTrue((out_dir / "legacy.docx").exists())
             self.assertEqual(list(out_dir.glob(".lo_profile_*")), [])
 
+    def test_legacy_text_fallback_manifest_is_powershell_json_safe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "legacy.doc"
+            text_path = tmp_path / "legacy-text.txt"
+            source.write_bytes(b"not a real legacy document")
+            text_path.write_text("Visible HT32 text\x01\nBell marker\x07\nForm feed\x0c\n", encoding="utf-8")
+
+            sys.path.insert(0, str(SCRIPTS_DIR))
+            try:
+                import read_office
+
+                manifest_path = read_office.write_legacy_text_artifacts(
+                    source,
+                    tmp_path,
+                    {"backend": "word-com-text", "output_path": str(text_path), "messages": []},
+                    None,
+                    "balanced",
+                )
+            finally:
+                sys.path.remove(str(SCRIPTS_DIR))
+
+            json.loads(manifest_path.read_text(encoding="utf-8"))
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    f"Get-Content -LiteralPath '{manifest_path}' -Raw | ConvertFrom-Json | Out-Null",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=10,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_legacy_conversion_skips_unhealthy_office_com_from_health_memory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "legacy.doc"
+            out_dir = tmp_path / "converted"
+            health_path = tmp_path / "conversion-health.json"
+            fake_soffice = tmp_path / "soffice.cmd"
+            source.write_bytes(b"not a real legacy document")
+            health_path.write_text(
+                json.dumps(
+                    {
+                        "conversion": {
+                            ".doc": {
+                                "office-com": {
+                                    "state": "unhealthy",
+                                    "reason": "timeout",
+                                    "timeout_seconds": 1,
+                                    "updated_at": "2026-06-03T00:00:00Z",
+                                }
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            fake_soffice.write_text(
+                "@echo off\r\n"
+                "set OUTDIR=\r\n"
+                ":args\r\n"
+                "if \"%~1\"==\"\" goto doneargs\r\n"
+                "if \"%~1\"==\"--outdir\" (\r\n"
+                "  set OUTDIR=%~2\r\n"
+                "  shift\r\n"
+                ")\r\n"
+                "shift\r\n"
+                "goto args\r\n"
+                ":doneargs\r\n"
+                "if not defined OUTDIR exit /b 2\r\n"
+                "echo fake docx> \"%OUTDIR%\\legacy.docx\"\r\n"
+                "exit /b 0\r\n",
+                encoding="utf-8",
+            )
+            script = SCRIPTS_DIR / "convert_legacy_office.ps1"
+            env = os.environ.copy()
+            env["PATH"] = str(tmp_path) + os.pathsep + env.get("PATH", "")
+            env["OFFICE_READER_CONVERSION_HEALTH_PATH"] = str(health_path)
+
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script),
+                    "-InputPath",
+                    str(source),
+                    "-OutputDir",
+                    str(out_dir),
+                    "-TimeoutSeconds",
+                    "5",
+                    "-ContinueAfterComFailure",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["backend"], "libreoffice")
+            self.assertIn("Skipping Office COM legacy conversion", " ".join(data["messages"]))
+
+    def test_legacy_conversion_rejects_health_path_that_would_overwrite_regular_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "legacy.doc"
+            out_dir = tmp_path / "converted"
+            protected_file = tmp_path / "ordinary-file.json"
+            source.write_bytes(b"not a real legacy document")
+            protected_file.write_text(json.dumps({"not_conversion_health": True}), encoding="utf-8")
+            script = SCRIPTS_DIR / "convert_legacy_office.ps1"
+            env = os.environ.copy()
+            env["OFFICE_READER_CONVERSION_HEALTH_PATH"] = str(protected_file)
+
+            try:
+                proc = subprocess.run(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        str(script),
+                        "-InputPath",
+                        str(source),
+                        "-OutputDir",
+                        str(out_dir),
+                    ],
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    timeout=5,
+                    env=env,
+                )
+            except subprocess.TimeoutExpired as exc:
+                self.fail(f"legacy conversion did not reject invalid health path quickly: {exc}")
+            self.assertNotEqual(proc.returncode, 0)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["status"], "failed")
+            self.assertIn("conversion health path", " ".join(data["messages"]).lower())
+            self.assertEqual(json.loads(protected_file.read_text(encoding="utf-8")), {"not_conversion_health": True})
+
+    def test_legacy_conversion_office_com_timeout_records_health_and_falls_back(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "legacy.doc"
+            out_dir = tmp_path / "converted"
+            health_path = tmp_path / "conversion-health.json"
+            fake_soffice = tmp_path / "soffice.cmd"
+            fake_worker = tmp_path / "slow-office-worker.ps1"
+            source.write_bytes(b"not a real legacy document")
+            fake_worker.write_text(
+                "param([string]$InputPath,[string]$OutputPath,[string]$Kind,[string[]]$ProgIds)\n"
+                "Start-Sleep -Seconds 3\n",
+                encoding="utf-8",
+            )
+            fake_soffice.write_text(
+                "@echo off\r\n"
+                "set OUTDIR=\r\n"
+                ":args\r\n"
+                "if \"%~1\"==\"\" goto doneargs\r\n"
+                "if \"%~1\"==\"--outdir\" (\r\n"
+                "  set OUTDIR=%~2\r\n"
+                "  shift\r\n"
+                ")\r\n"
+                "shift\r\n"
+                "goto args\r\n"
+                ":doneargs\r\n"
+                "if not defined OUTDIR exit /b 2\r\n"
+                "echo fake docx> \"%OUTDIR%\\legacy.docx\"\r\n"
+                "exit /b 0\r\n",
+                encoding="utf-8",
+            )
+            script = SCRIPTS_DIR / "convert_legacy_office.ps1"
+            env = os.environ.copy()
+            env["PATH"] = str(tmp_path) + os.pathsep + env.get("PATH", "")
+            env["OFFICE_READER_CONVERSION_HEALTH_PATH"] = str(health_path)
+            env["OFFICE_READER_COM_CONVERSION_WORKER"] = str(fake_worker)
+            env["OFFICE_READER_FAKE_OFFICE_PROGID"] = "Fake.Office.Application"
+
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script),
+                    "-InputPath",
+                    str(source),
+                    "-OutputDir",
+                    str(out_dir),
+                    "-PreferredBackend",
+                    "office-com",
+                    "-TimeoutSeconds",
+                    "1",
+                    "-ContinueAfterComFailure",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["backend"], "libreoffice")
+            self.assertIn("Office COM legacy conversion timed out", " ".join(data["messages"]))
+            health = json.loads(health_path.read_text(encoding="utf-8"))
+            entry = health["conversion"][".doc"]["office-com"]
+            self.assertEqual(entry["state"], "unhealthy")
+            self.assertEqual(entry["reason"], "timeout")
+
+    def test_legacy_conversion_libreoffice_timeout_is_structured(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "legacy.doc"
+            out_dir = tmp_path / "converted"
+            fake_soffice = tmp_path / "soffice.cmd"
+            source.write_bytes(b"not a real legacy document")
+            fake_soffice.write_text(
+                "@echo off\r\n"
+                "powershell -NoProfile -Command \"Start-Sleep -Seconds 3\"\r\n"
+                "exit /b 1\r\n",
+                encoding="utf-8",
+            )
+            script = SCRIPTS_DIR / "convert_legacy_office.ps1"
+            env = os.environ.copy()
+            env["PATH"] = str(tmp_path) + os.pathsep + env.get("PATH", "")
+
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script),
+                    "-InputPath",
+                    str(source),
+                    "-OutputDir",
+                    str(out_dir),
+                    "-PreferredBackend",
+                    "libreoffice",
+                    "-TimeoutSeconds",
+                    "1",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=10,
+                env=env,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["status"], "failed")
+            self.assertIn("LibreOffice conversion timed out", " ".join(data["messages"]))
+            self.assertEqual(list(out_dir.glob(".lo_profile_*")), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -70,6 +70,8 @@ Use `scripts/discover_office_backends.ps1 -InputExtension .doc -Format json` or 
 
 Detailed behavior is in `references/backend_fallbacks.md`.
 
+Legacy Office COM conversion uses an isolated worker with `--visual-timeout-seconds`/`-TimeoutSeconds` and records unhealthy Office COM conversion behavior in `.office-reader-cache/conversion-backend-health.json` unless `OFFICE_READER_CONVERSION_HEALTH_PATH` is set. When health memory marks Office COM unhealthy for `.doc` or `.ppt`, conversion skips directly to fallback backends while preserving the diagnostic message.
+
 ## Reading Expectations
 
 For `.docx`, extract document metadata, paragraphs, heading levels, tables, comments, tracked insertions and deletions, move revisions, media references, and a visual-review flag when drawings or media are present. Header, footer, footnote, and endnote text are included in the transcript and manifest with `part_type`/`part` location metadata when those OOXML parts are present. DOCX tables include rows plus semantic hints when available: caption, headers, nearby before/after text, and merged-cell signals. Block-level content controls are unpacked and tagged with `container: content_control`. Textbox-originated paragraphs, revisions, comments, and media are separated from their outer paragraph and tagged with `container: textbox`. DOCX media relationships include location context when available: paragraph index/text, table cell coordinates, nearest heading, nearby before/after text, media source (`drawingml` or `vml`), object id/name, alt text, title, DrawingML extent geometry, and detected figure/table captions. For layout tables, captions may be inferred from the same cell, same row, or nearest preceding caption row.
